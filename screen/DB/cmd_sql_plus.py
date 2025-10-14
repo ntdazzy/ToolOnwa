@@ -1,32 +1,36 @@
 # -*- coding: utf-8 -*-
 """
 cmd_sql_plus.py
-- Build SQL*Plus command string from form values.
-- Open new Command Prompt, auto-paste, and run it.
-- Toggle: use_host_port -> if True and host+port provided, use "host:port/alias", else only "alias".
 """
 from __future__ import annotations
-import subprocess
+import re, subprocess
 
-def _build_connect_str(user: str, password: str, host: str, port: str, alias: str, use_host_port: bool) -> str:
-    user = user.strip(); password = password.strip()
-    alias = alias.strip(); host = host.strip(); port = port.strip()
-    dsn = f"{host}:{port}/{alias}" if (use_host_port and host and port) else alias
-    return f"SQLPLUS {user}/{password}@{dsn}"
+CREATE_NEW_CONSOLE = 0x00000010  # Windows only
 
-def open_sqlplus(user: str, password: str, host: str, port: str, alias: str, use_host_port: bool=False) -> None:
-    """
-    Prepare a sqlplus command and paste it into a new cmd window, then execute.
-    """
-    cmdline = _build_connect_str(user, password, host, port, alias, use_host_port)
+def _quote_user(u: str) -> str:
+    # Bọc user nếu có ký tự đặc biệt
+    if re.search(r'[^A-Za-z0-9_$#]', u):
+        u = u.replace('"', '""')
+        return f'"{u}"'
+    return u
 
-    ps_script = rf"$c = '{cmdline}'; " \
-                rf"Set-Clipboard -Value $c; " \
-                rf"Start-Process cmd; " \
-                rf"Start-Sleep -Milliseconds 600; " \
-                rf"$ws = New-Object -ComObject WScript.Shell; " \
-                rf"$ws.SendKeys('^v'); " \
-                rf"Start-Sleep -Milliseconds 150; " \
-                rf"$ws.SendKeys('{{ENTER}}');"
+def _quote_pwd(p: str) -> str:
+    # Luôn bọc password
+    p = p.replace('"', '""')
+    return f'"{p}"'
 
-    subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script], shell=False)
+def build_dsn(host: str, port: str, alias_or_service: str, use_host_port: bool) -> str:
+    host = host.strip(); port = port.strip(); a = alias_or_service.strip()
+    return f"{host}:{port}/{a}" if (use_host_port and host and port and a) else a
+
+def build_connect_string(user: str, password: str, host: str, port: str, alias_or_service: str, use_host_port: bool) -> str:
+    u = _quote_user(user.strip()); p = _quote_pwd(password.strip())
+    dsn = build_dsn(host, port, alias_or_service, use_host_port)
+    return f"{u}/{p}@{dsn}"
+
+def open_sqlplus(user: str, password: str, host: str, port: str, alias_or_service: str, use_host_port: bool):
+    conn = build_connect_string(user, password, host, port, alias_or_service, use_host_port)
+    try:
+        subprocess.Popen(["sqlplus", conn], shell=False, creationflags=CREATE_NEW_CONSOLE)
+    except FileNotFoundError:
+        subprocess.Popen(["sqlplus.exe", conn], shell=False, creationflags=CREATE_NEW_CONSOLE)
