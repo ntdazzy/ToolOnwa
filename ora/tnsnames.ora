@@ -4,7 +4,7 @@
 # Date..........: Tue May 27 19:02:47 JST 2003
 ####################################
 
-#商事部開発用
+#Jp
 NEW_DEV3 =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -15,7 +15,7 @@ NEW_DEV3 =
     )
   )
 
-#パターンメイド開発用
+#p^[ChJp
 ONTPO01 =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -24,7 +24,7 @@ ONTPO01 =
     (CONNECT_DATA = (SERVICE_NAME = ONTPO01.WORLD))
   )
 
-#店舗情報開発用
+#Xﾜ繍p
 ONOT =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -33,7 +33,7 @@ ONOT =
     (CONNECT_DATA = (SID = onot))
   )
 
-#商事部用本番DB
+#p{DB
 ONSJDB01 =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -45,7 +45,7 @@ ONSJDB01 =
   )
 
 
-#店舗情報本番DB
+#Xﾜ旬DB
 MISE =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -54,7 +54,7 @@ MISE =
     (CONNECT_DATA = (SID = mise))
   )
 
-#なんじゃこりゃ？
+#ﾈんじゃこH
 n400.ondbcs.dom =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -63,7 +63,7 @@ n400.ondbcs.dom =
     (CONNECT_DATA = (SID = n400))
   )
 
-#パターンメイド本番DB
+#p^[Ch{DB
 ptmd.world = 
  (DESCRIPTION = 
     (ADDRESS_LIST = 
@@ -74,7 +74,7 @@ ptmd.world =
     )
  )
 
-#FD本番機(FDA/FDA@OAG02)
+#FD{ﾔ機(FDA/FDA@OAG02)
 #OAG02 =
 #  (DESCRIPTION =
 #    (ADDRESS_LIST =
@@ -87,7 +87,7 @@ ptmd.world =
 
 
 
-#企画生産開発
+#謳ｶYJ
 ONNPR =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -97,7 +97,7 @@ ONNPR =
      (CONNECT_DATA = (SID = npr2))
      )
 
-#Gv開発用?
+#GvJp?
 #UME =
 #  (DESCRIPTION =
 #    (ADDRESS_LIST =
@@ -106,7 +106,7 @@ ONNPR =
 #    (CONNECT_DATA = (SID = cvora)(SERVER = DEDICATED))
 #  )
 
-#ON_DEV3上のDB
+#ON_DEV3DB
 DEV3 =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -115,7 +115,7 @@ DEV3 =
     (CONNECT_DATA = (SID = DEV3)(SERVER = DEDICATED))
   )
 
-#BizMart開発用
+#BizMartJp
 #MARGARITA =
 #  (DESCRIPTION =
 #    (ADDRESS_LIST =
@@ -124,7 +124,7 @@ DEV3 =
 #    (CONNECT_DATA = (SID = b2b)(SERVER = DEDICATED))
 #  )
 
-#企画生産本番
+#謳ｶY{
 NPDB=
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -136,14 +136,14 @@ NPDB=
   )
 
 
-# 総務経費（本番）、統合DB
+# oi{ﾔ）ADB
 onnrfs03 =
   (DESCRIPTION =
     (ADDRESS = (PROTOCOL = TCP)(HOST = 192.169.115.161)(PORT = 1521))
     (CONNECT_DATA = (SID = onor))
   )
 
-#新計算書テスト機（keiei/nri)　※他のシステム(ＩＣＢ)の本番機でもある。
+#VvZeXg@ikeiei/nri)@ﾌシXe(hba)ﾌ本ﾔ機ﾅ�B
 ONOR =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -153,7 +153,7 @@ ONOR =
   )
 
 
-#新アポロ、新計算書本番機（アポロ：apollo_nri/nri、計算書：keiei/nri)
+#VA|AVvZ{ﾔ機iA|Fapollo_nri/nriAvZFkeiei/nri)
 ondbks01 =
   (DESCRIPTION =
    (ADDRESS_LIST =
@@ -169,7 +169,7 @@ ONDBFS02 =
     (CONNECT_DATA = (SID = ONOT))
   )
 
-#人財開発ＤＢ
+#lJca
 ONPT =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -180,7 +180,7 @@ ONPT =
     )
   )
 
-#人財間借り店舗情報開発ＤＢ
+#lﾔ借９ﾜ繍ca
 ontnp =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -192,7 +192,7 @@ ontnp =
   )
 
 
-#人財本番ＤＢ
+#l{ﾔＤa
 pega.world =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -204,7 +204,7 @@ pega.world =
   )
 
 
-#新単品開発機
+#VPiJ@
 TTST =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -215,7 +215,7 @@ TTST =
     )
   )
 
-#店舗情報　新開発ＤＢ
+#Xﾜ宗VJca
 shopdev =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -227,14 +227,14 @@ shopdev =
     )
   )
 
-#ＩＣＢＤＢ　開発ＤＢ(ONNS_TEST/NRI@ONNS)
+#hbaca@Jca(ONNS_TEST/NRI@ONNS)
 ONNS =
   (DESCRIPTION =
     (ADDRESS = (PROTOCOL = TCP)(HOST = 192.169.83.215)(PORT = 1521))
     (CONNECT_DATA = (SID = npr2))
   )
 
-#新単品本番
+#VPi{
 ONNDDB01 =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -254,7 +254,7 @@ ONNDDB01 =
 #    )
 #  )
 
-#新店舗情報本番ＤＢ(SHP_USR/TEST)
+#VXﾜ旬ﾔＤa(SHP_USR/TEST)
 SHOP02 =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -265,7 +265,7 @@ SHOP02 =
     )
   )
 
-#新店舗情報検証ＤＢ
+#VXﾜ杖検証Ｄa
 SHOP05 =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -276,7 +276,7 @@ SHOP05 =
     )
   )
 
-#新店舗情報検証ＤＢ
+#VXﾜ杖検証Ｄa
 MDDB02 =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -288,7 +288,7 @@ MDDB02 =
   )
 
 
-#新店舗情報本番ＤＢ(SHP_USR/TEST)
+#VXﾜ旬ﾔＤa(SHP_USR/TEST)
 OSHP.world =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -298,7 +298,7 @@ OSHP.world =
       (SERVICE_NAME = shop02.onshop.dom)
     )
   )
-#新店舗情報本番ＤＢ(SHP_USR/TEST)
+#VXﾜ旬ﾔＤa(SHP_USR/TEST)
 onlux.world =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -430,7 +430,7 @@ C8 =
          (SERVICE_NAME = C8)
       )
    )
-#新流通店別計算書テスト機（keisan_test/test）
+#Vﾊ店ﾊ計ZeXg@ikeisan_test/testj
 ONSR.WORLD =
   (DESCRIPTION =
     (ADDRESS_LIST =
@@ -603,18 +603,14 @@ YAORA  =
         )
     )
 ONDEVDB01 =
-    (DESCRIPTION =
-        (ADDRESS_LIST =
-            (ADDRESS =
-                (PROTOCOL = TCP)
-                (HOST = 172.96.55.70)
-                (PORT = 1522)
-            )
-        )
-        (CONNECT_DATA =
-            (SERVICE_NAME = ONDEVDB01)
-        )
+  (DESCRIPTION =
+    (ADDRESS_LIST =
+      (ADDRESS = (PROTOCOL = TCP)(HOST = 172.96.55.70)(PORT = 1522))
     )
+    (CONNECT_DATA =
+      (SERVICE_NAME = ONDEVDB01)
+    )
+  )
 ONDEVDB10 =
     (DESCRIPTION =
         (ADDRESS_LIST =

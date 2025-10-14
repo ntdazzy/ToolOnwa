@@ -1,0 +1,29 @@
+# Đảm bảo thống nhất kiểu dòng kết thúc
+* text=auto
+
+# Python script luôn dùng LF
+*.py text eol=lf
+
+# Batch và PowerShell script dùng CRLF (Windows)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Các file cấu hình giữ nguyên định dạng
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.ini text eol=lf
+*.cfg text eol=lf
+
+# Không thay đổi font và icon binary
+*.ttf binary
+*.otf binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+
+# Giữ nguyên encoding cho file .ora và các file sql
+*.ora text eol=lf
+*.sql text eol=lf
