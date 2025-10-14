@@ -148,6 +148,7 @@ class ToolVIP(tk.Tk):
         self.config=load_config()
         self.current_ora_path=self.config.get("ora_path") or DEFAULT_ORA_PATH
         self.lang=self.config.get("lang","VN")
+        self.show_pwd = tk.BooleanVar(value=False)
         self.use_host_port = tk.BooleanVar(value=bool(self.config.get("use_host_port", False)))
 
         self._setup_fonts()
@@ -193,7 +194,8 @@ class ToolVIP(tk.Tk):
         self.ent_user=ttk.Entry(connect); self.ent_user.grid(row=1,column=1,columnspan=2,sticky="ew",pady=2)
 
         ttk.Label(connect,text=self._t("Password")).grid(row=2,column=0,sticky="w",pady=2,padx=(0,6))
-        self.ent_pass=ttk.Entry(connect, show="*"); self.ent_pass.grid(row=2,column=1,columnspan=2,sticky="ew",pady=2)
+        self.ent_pass=ttk.Entry(connect, show="*"); self.ent_pass.grid(row=2,column=1,sticky="ew",pady=2)
+        ttk.Checkbutton(connect, text=self._t("Hiện mật khẩu"), variable=self.show_pwd, command=self._toggle_show_pwd).grid(row=2, column=2, sticky="w")
 
         ttk.Label(connect,text=self._t("Data Source")).grid(row=3,column=0,sticky="w",pady=2,padx=(0,6))
         self.ent_dsn=ttk.Entry(connect); self.ent_dsn.grid(row=3,column=1,columnspan=2,sticky="ew",pady=(2,0))
@@ -439,6 +441,9 @@ class ToolVIP(tk.Tk):
                 self.cbo_conn.set(v)
                 self._on_pick_connection()
                 break
+    def _toggle_show_pwd(self):
+        self.ent_pass.config(show="" if self.show_pwd.get() else "*")
+        
     def _run_cmd_sqlplus(self):
         user = self.ent_user.get().strip()
         pwd  = self.ent_pass.get().strip()
