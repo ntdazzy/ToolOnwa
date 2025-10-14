@@ -11,6 +11,9 @@ from tkinter import font as tkfont
 from tkinter.scrolledtext import ScrolledText
 from screen.DB import edit_connection
 from screen.DB import cmd_sql_plus
+from screen.DB import insert as insert_screen
+from screen.DB import update as update_screen
+from screen.DB import backup as backup_screen
 
 APP_TITLE = "ToolONWA VIP v1.0"
 WIN_W, WIN_H = 560, 600
@@ -204,9 +207,9 @@ class ToolVIP(tk.Tk):
         action=ttk.LabelFrame(self.db_group, text="Action", padding=8, relief="ridge", borderwidth=2)
         action.grid(row=1,column=0,columnspan=2,sticky="ew")
         for i in range(3): action.columnconfigure(i, weight=1)
-        ttk.Button(action,text="Insert").grid(row=0,column=0,sticky="ew",padx=4,pady=4)
-        ttk.Button(action,text="Update").grid(row=0,column=1,sticky="ew",padx=4,pady=4)
-        ttk.Button(action,text="Backup/Restore").grid(row=0,column=2,sticky="ew",padx=4,pady=4)
+        ttk.Button(action,text="Insert", command=self._open_insert_screen).grid(row=0,column=0,sticky="ew",padx=4,pady=4)
+        ttk.Button(action,text="Update", command=self._open_update_screen).grid(row=0,column=1,sticky="ew",padx=4,pady=4)
+        ttk.Button(action,text="Backup/Restore", command=self._open_backup_restore).grid(row=0,column=2,sticky="ew",padx=4,pady=4)
         ttk.Button(action,text="SQL Plus", command=self._run_cmd_sqlplus).grid(row=1,column=0,sticky="ew",padx=4,pady=4)
         ttk.Button(action,text="Compare Data").grid(row=1,column=1,sticky="ew",padx=4,pady=4)
         ttk.Button(action,text="Edit Connection", command=self._edit_connection).grid(row=1,column=2,sticky="ew",padx=4,pady=4)
@@ -441,6 +444,62 @@ class ToolVIP(tk.Tk):
             cmd_sql_plus.open_sqlplus(user, pwd, host, port, alias, self.var_use_host_port.get())
         except Exception as e:
             messagebox.showerror(APP_TITLE, f"Lỗi mở SQL*Plus: {e}")
+
+    def _collect_connection_info(self) -> dict | None:
+        user = self.ent_user.get().strip()
+        password = self.ent_pass.get()
+        alias = self.ent_dsn.get().strip()
+        host = self.ent_host.get().strip()
+        port = self.ent_port.get().strip()
+        if not user or not password or not alias:
+            messagebox.showwarning(APP_TITLE, "Vui lòng nhập User/Password/Data Source.")
+            return None
+        return {
+            "user": user,
+            "password": password,
+            "alias": alias,
+            "host": host,
+            "port": port,
+            "use_host_port": bool(self.var_use_host_port.get()),
+        }
+
+    def _open_insert_screen(self):
+        info = self._collect_connection_info()
+        if not info:
+            return
+        insert_screen.open_insert_window(self, info)
+
+    def _open_update_screen(self):
+        info = self._collect_connection_info()
+        if not info:
+            return
+        update_screen.open_update_window(self, info)
+
+    def _open_backup_restore(self):
+        info = self._collect_connection_info()
+        if not info:
+            return
+        choice = messagebox.askyesnocancel(
+            APP_TITLE,
+            "Bạn muốn thực hiện Backup hay Restore?\nYes = Backup, No = Restore, Cancel = Hủy.",
+            parent=self,
+        )
+        if choice is None:
+            return
+        if choice:
+            backup_screen.open_backup_window(self, info)
+            return
+        restore_choice = messagebox.askyesnocancel(
+            APP_TITLE,
+            "Restore từ bảng backup?\nYes = Bảng backup, No = CSV, Cancel = Hủy.",
+            parent=self,
+        )
+        if restore_choice is None:
+            return
+        if restore_choice:
+            backup_screen.open_restore_from_backup_window(self, info)
+        else:
+            backup_screen.open_restore_from_csv_window(self, info)
 
     def _open_log_view_mu(self):
         # đường dẫn tới script
