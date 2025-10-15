@@ -5,12 +5,22 @@ cd /d "%~dp0"
 :: Ưu tiên Python 3.11 nếu có
 where py >nul 2>nul && (py -3.11 -V >nul 2>nul && set "PY=py -3.11") || (set "PY=python")
 
-:: Tạo venv
-%PY% -m venv venv || goto :e
-call venv\Scripts\activate.bat
+:: Tạo hoặc sử dụng lại venv
+if not exist ".venv" (
+    %PY% -m venv .venv || goto :e
+)
+call .venv\Scripts\activate.bat
 
 python -m pip install --upgrade pip
-pip install pyinstaller
+if exist requirements.txt (
+    pip install -r requirements.txt
+) else (
+    pip install pyinstaller oracledb cx-Oracle
+)
+
+:: Dọn build cũ
+if exist build rmdir /s /q build
+if exist dist rmdir /s /q dist
 
 :: Build 1 file exe + icon + kèm data
 pyinstaller main.py ^
