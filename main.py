@@ -5,7 +5,6 @@ ToolONWA VIP v1.0 - main
 """
 import os, re, sys, json, threading
 import tkinter as tk
-import subprocess
 from tkinter import ttk, filedialog, messagebox
 from tkinter import font as tkfont
 from tkinter.scrolledtext import ScrolledText
@@ -14,6 +13,8 @@ from screen.DB import cmd_sql_plus
 from screen.DB import insert as insert_screen
 from screen.DB import update as update_screen
 from screen.DB import backup as backup_screen
+from screen.MU import log_viewer as log_viewer
+from core import i18n
 
 APP_TITLE = "ToolONWA VIP v1.0"
 WIN_W, WIN_H = 560, 600
@@ -127,24 +128,29 @@ class ToolVIP(tk.Tk):
         self.minsize(WIN_W, WIN_H); self.maxsize(WIN_W, WIN_H)
         self.resizable(False, False)
 
-        self.lang="VN"
         self.config = load_config()
+        preferred_lang = self.config.get("lang", i18n.LANG_VI)
+        i18n.set_language(preferred_lang)
+        self.lang = i18n.get_language()
         self.current_ora_path = self.config.get("ora_path") or DEFAULT_ORA_PATH
-        self.lang = self.config.get("lang","VN")
 
         # state
         self.show_pwd = tk.BooleanVar(value=False)
         self.var_use_host_port = tk.BooleanVar(value=bool(self.config.get("use_host_port", False)))
         self._last_error = ""
+        self._status_custom = False
         self.conn_blocks = {}
 
         self._setup_fonts()
         self._build_ui()
+        self._lang_listener = self._handle_language_change
+        i18n.add_listener(self._lang_listener)
+        self._apply_language()
         self._center_on_screen()
         self._load_ora(self.current_ora_path)
         created = ensure_db_list_file()
         self._load_combobox_from_json()
-        if created: self._set_status("Created configs/db_list.json", ok=False)
+        if created: self._set_status("main.status.created_db_list", ok=False)
 
     def _setup_fonts(self):
         base = tkfont.nametofont("TkDefaultFont"); base.configure(size=10)
@@ -161,111 +167,206 @@ class ToolVIP(tk.Tk):
         style.configure("Details.TButton", padding=(6,2))   # smaller details button
 
     def _build_ui(self):
-        self.rowconfigure(0, weight=1); self.columnconfigure(0, weight=1)
-        root=ttk.Frame(self, padding=8); root.grid(row=0,column=0,sticky="nsew"); root.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
 
-        self.db_group=ttk.LabelFrame(root, text=self._t("DB"), padding=(8,6), relief="ridge", borderwidth=2)
-        self.db_group.grid(row=0,column=0,sticky="nsew",padx=2,pady=(2,8))
-        self.db_group.columnconfigure(0, weight=1); self.db_group.columnconfigure(1, weight=0)
+        root = ttk.Frame(self, padding=8)
+        root.grid(row=0, column=0, sticky="nsew")
+        root.columnconfigure(0, weight=1)
 
-        connect=ttk.LabelFrame(self.db_group, text=self._t("Thiết Lập Kết Nối"), padding=8, relief="ridge", borderwidth=2)
-        connect.grid(row=0,column=0,sticky="nsew",padx=(0,8),pady=(0,8))
-        connect.columnconfigure(0, weight=1); connect.columnconfigure(1, weight=1); connect.columnconfigure(2, weight=0)
+        # Nhóm DB
+        self.db_group = ttk.LabelFrame(root, padding=(8, 6), relief="ridge", borderwidth=2)
+        self.db_group.grid(row=0, column=0, sticky="nsew", padx=2, pady=(2, 8))
+        self.db_group.columnconfigure(0, weight=1)
+        self.db_group.columnconfigure(1, weight=0)
 
-        self.cbo_conn=ttk.Combobox(connect, state="readonly")
-        # combobox chiếm toàn bộ bề ngang của khối connect
-        self.cbo_conn.grid(row=0,column=0,columnspan=3,sticky="ew",pady=(0,6))
+        self.frm_connection = ttk.LabelFrame(self.db_group, padding=8, relief="ridge", borderwidth=2)
+        self.frm_connection.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 8))
+        self.frm_connection.columnconfigure(0, weight=1)
+        self.frm_connection.columnconfigure(1, weight=1)
+        self.frm_connection.columnconfigure(2, weight=0)
+
+        self.cbo_conn = ttk.Combobox(self.frm_connection, state="readonly")
+        self.cbo_conn.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 6))
         self.cbo_conn.bind("<<ComboboxSelected>>", self._on_pick_connection)
 
-        ttk.Label(connect,text=self._t("User ID")).grid(row=1,column=0,sticky="w",pady=2,padx=(0,6))
-        self.ent_user=ttk.Entry(connect); self.ent_user.grid(row=1,column=1,columnspan=2,sticky="ew",pady=2)
+        self.lbl_user = ttk.Label(self.frm_connection)
+        self.lbl_user.grid(row=1, column=0, sticky="w", pady=2, padx=(0, 6))
+        self.ent_user = ttk.Entry(self.frm_connection)
+        self.ent_user.grid(row=1, column=1, columnspan=2, sticky="ew", pady=2)
 
-        ttk.Label(connect,text=self._t("Password")).grid(row=2,column=0,sticky="w",pady=2,padx=(0,6))
-        self.ent_pass=ttk.Entry(connect, show="*"); self.ent_pass.grid(row=2,column=1,sticky="ew",pady=2)
-        ttk.Checkbutton(connect, text=self._t("Hiện mật khẩu"), variable=self.show_pwd,
-                        command=self._toggle_show_pwd).grid(row=2, column=2, sticky="w")
+        self.lbl_password = ttk.Label(self.frm_connection)
+        self.lbl_password.grid(row=2, column=0, sticky="w", pady=2, padx=(0, 6))
+        self.ent_pass = ttk.Entry(self.frm_connection, show="*")
+        self.ent_pass.grid(row=2, column=1, sticky="ew", pady=2)
+        self.chk_show_pwd = ttk.Checkbutton(
+            self.frm_connection,
+            variable=self.show_pwd,
+            command=self._toggle_show_pwd,
+        )
+        self.chk_show_pwd.grid(row=2, column=2, sticky="w")
 
-        ttk.Label(connect,text=self._t("Data Source")).grid(row=3,column=0,sticky="w",pady=2,padx=(0,6))
-        self.ent_dsn=ttk.Entry(connect); self.ent_dsn.grid(row=3,column=1,columnspan=2,sticky="ew",pady=(2,0))
+        self.lbl_datasource = ttk.Label(self.frm_connection)
+        self.lbl_datasource.grid(row=3, column=0, sticky="w", pady=2, padx=(0, 6))
+        self.ent_dsn = ttk.Entry(self.frm_connection)
+        self.ent_dsn.grid(row=3, column=1, columnspan=2, sticky="ew", pady=(2, 0))
 
-        ttk.Label(connect,text=self._t("Host/Port")).grid(row=4,column=0,sticky="w",pady=2,padx=(0,6))
-        self.ent_host=ttk.Entry(connect); self.ent_host.grid(row=4,column=1,sticky="ew",pady=2,padx=(0,3))
-        self.ent_port=ttk.Entry(connect,width=8); self.ent_port.grid(row=4,column=2,sticky="ew",pady=2,padx=(3,0))
+        self.lbl_hostport = ttk.Label(self.frm_connection)
+        self.lbl_hostport.grid(row=4, column=0, sticky="w", pady=2, padx=(0, 6))
+        self.ent_host = ttk.Entry(self.frm_connection)
+        self.ent_host.grid(row=4, column=1, sticky="ew", pady=2, padx=(0, 3))
+        self.ent_port = ttk.Entry(self.frm_connection, width=8)
+        self.ent_port.grid(row=4, column=2, sticky="ew", pady=2, padx=(3, 0))
 
-        ttk.Checkbutton(connect, text=self._t("SQL Plus kèm host:port"),
-                        variable=self.var_use_host_port,
-                        command=self._on_toggle_hostport).grid(row=5, column=0, columnspan=3, sticky="w", pady=(4,0))
+        self.chk_sqlplus_host = ttk.Checkbutton(
+            self.frm_connection,
+            variable=self.var_use_host_port,
+            command=self._on_toggle_hostport,
+        )
+        self.chk_sqlplus_host.grid(row=5, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
-        right=ttk.Frame(self.db_group); right.grid(row=0,column=1,sticky="nsew",pady=(24,8))
-        right.columnconfigure(0, weight=1); right.rowconfigure(0, weight=1)
-        ttk.Frame(right).grid(row=0, column=0, sticky="ns")  # spacer
-        self.btn_open_ora=ttk.Button(right,text=self._t("Open Ora File"),command=self._open_ora_dialog,width=18)
-        self.btn_open_ora.grid(row=1,column=0,sticky="ew",pady=(6,6))
-        self.btn_check=ttk.Button(right,text=self._t("Check Connection"),command=self._check_connection,width=18)
-        self.btn_check.grid(row=2,column=0,sticky="ew")
+        self.frm_shortcuts = ttk.Frame(self.db_group)
+        self.frm_shortcuts.grid(row=0, column=1, sticky="nsew", pady=(24, 8))
+        self.frm_shortcuts.columnconfigure(0, weight=1)
+        ttk.Frame(self.frm_shortcuts).grid(row=0, column=0, sticky="ns")
+        self.btn_open_ora = ttk.Button(self.frm_shortcuts, command=self._open_ora_dialog, width=18)
+        self.btn_open_ora.grid(row=1, column=0, sticky="ew", pady=(6, 6))
+        self.btn_check = ttk.Button(self.frm_shortcuts, command=self._check_connection, width=18)
+        self.btn_check.grid(row=2, column=0, sticky="ew")
 
-        action=ttk.LabelFrame(self.db_group, text="Action", padding=8, relief="ridge", borderwidth=2)
-        action.grid(row=1,column=0,columnspan=2,sticky="ew")
-        for i in range(3): action.columnconfigure(i, weight=1)
-        ttk.Button(action,text="Insert", command=self._open_insert_screen).grid(row=0,column=0,sticky="ew",padx=4,pady=4)
-        ttk.Button(action,text="Update", command=self._open_update_screen).grid(row=0,column=1,sticky="ew",padx=4,pady=4)
-        ttk.Button(action,text="Backup/Restore", command=self._open_backup_restore).grid(row=0,column=2,sticky="ew",padx=4,pady=4)
-        ttk.Button(action,text="SQL Plus", command=self._run_cmd_sqlplus).grid(row=1,column=0,sticky="ew",padx=4,pady=4)
-        ttk.Button(action,text="Compare Data").grid(row=1,column=1,sticky="ew",padx=4,pady=4)
-        ttk.Button(action,text="Edit Connection", command=self._edit_connection).grid(row=1,column=2,sticky="ew",padx=4,pady=4)
+        self.frm_action = ttk.LabelFrame(self.db_group, padding=8, relief="ridge", borderwidth=2)
+        self.frm_action.grid(row=1, column=0, columnspan=2, sticky="ew")
+        for i in range(3):
+            self.frm_action.columnconfigure(i, weight=1)
+        self.btn_insert = ttk.Button(self.frm_action, command=self._open_insert_screen)
+        self.btn_insert.grid(row=0, column=0, sticky="ew", padx=4, pady=4)
+        self.btn_update = ttk.Button(self.frm_action, command=self._open_update_screen)
+        self.btn_update.grid(row=0, column=1, sticky="ew", padx=4, pady=4)
+        self.btn_backup = ttk.Button(self.frm_action, command=self._open_backup_restore)
+        self.btn_backup.grid(row=0, column=2, sticky="ew", padx=4, pady=4)
+        self.btn_sqlplus = ttk.Button(self.frm_action, command=self._run_cmd_sqlplus)
+        self.btn_sqlplus.grid(row=1, column=0, sticky="ew", padx=4, pady=4)
+        self.btn_compare = ttk.Button(self.frm_action, command=self._coming_soon)
+        self.btn_compare.grid(row=1, column=1, sticky="ew", padx=4, pady=4)
+        self.btn_edit_conn = ttk.Button(self.frm_action, command=self._edit_connection)
+        self.btn_edit_conn.grid(row=1, column=2, sticky="ew", padx=4, pady=4)
 
-        mu=ttk.LabelFrame(root,text=self._t("MU"),padding=(8,6), relief="ridge", borderwidth=2)
-        mu.grid(row=1,column=0,sticky="ew",padx=2,pady=(0,8))
-        ttk.Button(mu,text=self._t("Read Log MU"), command=self._open_log_view_mu).grid(row=0,column=0,padx=4,pady=4,sticky="w")
+        self.frm_mu = ttk.LabelFrame(root, padding=(8, 6), relief="ridge", borderwidth=2)
+        self.frm_mu.grid(row=1, column=0, sticky="ew", padx=2, pady=(0, 8))
+        self.btn_log_mu = ttk.Button(self.frm_mu, command=self._open_log_view_mu)
+        self.btn_log_mu.grid(row=0, column=0, padx=4, pady=4, sticky="w")
 
-        common=ttk.LabelFrame(root,text=self._t("Chung"),padding=(8,6), relief="ridge", borderwidth=2)
-        common.grid(row=2,column=0,sticky="ew",padx=2,pady=(0,8))
-        for i in range(3): common.columnconfigure(i, weight=1)
-        ttk.Button(common,text=self._t("RDS information"),command=self._coming_soon).grid(row=0,column=0,padx=8,pady=4,sticky="ew")
-        ttk.Button(common,text=self._t("Tài liệu"),command=self._coming_soon).grid(row=0,column=1,padx=8,pady=4,sticky="ew")
-        ttk.Button(common,text=self._t("Bí kíp võ công"),command=self._coming_soon).grid(row=0,column=2,padx=8,pady=4,sticky="ew")
+        self.frm_common = ttk.LabelFrame(root, padding=(8, 6), relief="ridge", borderwidth=2)
+        self.frm_common.grid(row=2, column=0, sticky="ew", padx=2, pady=(0, 8))
+        for i in range(3):
+            self.frm_common.columnconfigure(i, weight=1)
+        self.btn_rds = ttk.Button(self.frm_common, command=self._coming_soon)
+        self.btn_rds.grid(row=0, column=0, padx=8, pady=4, sticky="ew")
+        self.btn_docs = ttk.Button(self.frm_common, command=self._coming_soon)
+        self.btn_docs.grid(row=0, column=1, padx=8, pady=4, sticky="ew")
+        self.btn_tips = ttk.Button(self.frm_common, command=self._coming_soon)
+        self.btn_tips.grid(row=0, column=2, padx=8, pady=4, sticky="ew")
 
-        bottom=ttk.Frame(root); bottom.grid(row=3,column=0,sticky="ew",pady=(4,0))
+        bottom = ttk.Frame(root)
+        bottom.grid(row=3, column=0, sticky="ew", pady=(4, 0))
         bottom.columnconfigure(0, weight=1)
 
-        self.lbl_status=ttk.Label(bottom,text=self._t("Chưa kết nối"),anchor="w",relief="sunken", style="Status.TLabel")
-        self.lbl_status.grid(row=0,column=0,sticky="ew",padx=(0,6))
+        self.lbl_status = ttk.Label(bottom, anchor="w", relief="sunken", style="Status.TLabel")
+        self.lbl_status.grid(row=0, column=0, sticky="ew", padx=(0, 6))
 
-        # Details button small and hidden initially
-        self.btn_details = ttk.Button(bottom, text=self._t("Chi tiết"), width=8, command=self._show_error_details, style="Details.TButton")
+        self.btn_details = ttk.Button(bottom, width=8, command=self._show_error_details, style="Details.TButton")
         self.btn_details.grid(row=0, column=1, sticky="e")
 
-        ttk.Label(bottom,text=self._t("Ngôn Ngữ")).grid(row=0,column=2,sticky="e",padx=(8,4))
-        self.cbo_lang=ttk.Combobox(bottom,state="readonly",width=6,values=["VN","JP"])
-        self.cbo_lang.grid(row=0,column=3,sticky="e"); self.cbo_lang.set(self.lang)
+        self.lbl_language = ttk.Label(bottom)
+        self.lbl_language.grid(row=0, column=2, sticky="e", padx=(8, 4))
+        self.cbo_lang = ttk.Combobox(bottom, state="readonly", width=6, values=[i18n.LANG_VI, i18n.LANG_JP])
+        self.cbo_lang.grid(row=0, column=3, sticky="e")
+        self.cbo_lang.set(self.lang)
         self.cbo_lang.bind("<<ComboboxSelected>>", self._on_change_lang)
-
     def _center_on_screen(self):
         self.update_idletasks()
         w,h=self.winfo_width(),self.winfo_height()
         x=(self.winfo_screenwidth()-w)//2; y=(self.winfo_screenheight()-h)//2
         self.geometry(f"{w}x{h}+{x}+{y}")
 
-    def _t(self,s):
-        vi={"DB":"DB","Thiết Lập Kết Nối":"Thiết Lập Kết Nối","User ID":"User ID","Password":"Password","Data Source":"Data Source","Host/Port":"Host/Port","Open Ora File":"Open Ora File","Check Connection":"Check Connection","Insert":"Insert","Update":"Update","Backup/Restore":"Backup/Restore","SQL Plus":"SQL Plus","Compare Data":"Compare Data","Edit Connection":"Edit Connection","MU":"MU","Read Log MU":"Read Log MU","Chung":"Chung","RDS information":"RDS information","Tài liệu":"Tài liệu","Bí kíp võ công":"Bí kíp võ công","Chưa kết nối":"Chưa kết nối","Ngôn Ngữ":"Ngôn Ngữ","Chi tiết":"Chi tiết","Kết nối thất bại":"Kết nối thất bại","Kết nối thành công":"Kết nối thành công"}
-        ja={"DB":"DB","Thiết Lập Kết Nối":"接続設定","User ID":"ユーザーID","Password":"パスワード","Data Source":"データソース","Host/Port":"ホスト/ポート","Open Ora File":"tnsnamesを開く","Check Connection":"接続チェック","Insert":"挿入","Update":"更新","Backup/Restore":"バックアップ/復元","SQL Plus":"SQL Plus","Compare Data":"データ比較","Edit Connection":"接続編集","MU":"MU","Read Log MU":"MUログ読込","Chung":"共通","RDS information":"RDS情報","Tài liệu":"ドキュメント","Bí kíp võ công":"Tips","Chưa kết nối":"未接続","Ngôn Ngữ":"言語","Chi tiết":"詳細","Kết nối thất bại":"接続失敗","Kết nối thành công":"接続成功"}
-        return (vi if self.lang=="VN" else ja).get(s,s)
+    def _t(self, key: str, default: str | None = None, **fmt) -> str:
+        """Tiện ích gọi bộ dịch chung."""
+        return i18n.translate(key, default=default, **fmt)
 
-    def _apply_language(self):
-        self.db_group.config(text=self._t("DB"))
-        self.btn_open_ora.config(text=self._t("Open Ora File"))
-        self.btn_check.config(text=self._t("Check Connection"))
-        self.lbl_status.config(text=self._t("Chưa kết nối"))
-        self.btn_details.config(text=self._t("Chi tiết"))
+    def _handle_language_change(self, lang: str) -> None:
+        """Callback khi ngôn ngữ toàn cục thay đổi."""
+        self.lang = lang
+        self._apply_language()
 
-    def _on_change_lang(self,_): self.lang=self.cbo_lang.get(); self.config["lang"]=self.lang; save_config(self.config); self._apply_language()
+    def destroy(self):
+        if hasattr(self, "_lang_listener"):
+            i18n.remove_listener(self._lang_listener)
+        super().destroy()
+
+    def _apply_language(self) -> None:
+        """Cập nhật toàn bộ nhãn theo ngôn ngữ hiện tại."""
+        self.lang = i18n.get_language()
+        if self.cbo_lang.get() != self.lang:
+            self.cbo_lang.set(self.lang)
+
+        self.db_group.config(text=self._t("main.section.db"))
+        self.frm_connection.config(text=self._t("main.section.connection"))
+        self.lbl_user.config(text=self._t("main.label.user_id"))
+        self.lbl_password.config(text=self._t("main.label.password"))
+        self.chk_show_pwd.config(text=self._t("main.btn.show_password"))
+        self.lbl_datasource.config(text=self._t("main.label.data_source"))
+        self.lbl_hostport.config(text=self._t("main.label.host_port"))
+        self.chk_sqlplus_host.config(text=self._t("main.chk.sqlplus_hostport"))
+
+        self.btn_open_ora.config(text=self._t("main.btn.open_ora"))
+        self.btn_check.config(text=self._t("main.btn.check_connection"))
+
+        self.frm_action.config(text=self._t("main.section.actions"))
+        self.btn_insert.config(text=self._t("main.btn.insert"))
+        self.btn_update.config(text=self._t("main.btn.update"))
+        self.btn_backup.config(text=self._t("main.btn.backup"))
+        self.btn_sqlplus.config(text=self._t("main.btn.sqlplus"))
+        self.btn_compare.config(text=self._t("main.btn.compare"))
+        self.btn_edit_conn.config(text=self._t("main.btn.edit_conn"))
+
+        self.frm_mu.config(text=self._t("main.section.mu"))
+        self.btn_log_mu.config(text=self._t("main.btn.read_log_mu"))
+
+        self.frm_common.config(text=self._t("main.section.common"))
+        self.btn_rds.config(text=self._t("main.btn.rds_info"))
+        self.btn_docs.config(text=self._t("main.btn.docs"))
+        self.btn_tips.config(text=self._t("main.btn.tips"))
+
+        if not getattr(self, "_status_custom", False):
+            self.lbl_status.config(text=self._t("main.status.not_connected"))
+        self.btn_details.config(text=self._t("main.btn.details"))
+
+        self.lbl_language.config(text=self._t("main.label.language"))
+
+    def _on_change_lang(self, _event=None) -> None:
+        lang = self.cbo_lang.get()
+        i18n.set_language(lang)
+        self.config["lang"] = i18n.get_language()
+        save_config(self.config)
+
+
 
     # ---------- data sources ----------
     def _open_ora_dialog(self):
-        initdir=os.path.dirname(self.current_ora_path) if self.current_ora_path else BASE_DIR
-        path=filedialog.askopenfilename(title=self._t("Open Ora File"), filetypes=[("tnsnames.ora","tnsnames.ora"),("All files","*.*")], initialdir=initdir)
+        initdir = os.path.dirname(self.current_ora_path) if self.current_ora_path else BASE_DIR
+        path = filedialog.askopenfilename(
+            title=self._t("main.btn.open_ora"),
+            filetypes=[("tnsnames.ora", "tnsnames.ora"), ("All files", "*.*")],
+            initialdir=initdir,
+        )
         if path:
-            self.current_ora_path=path; self.config["ora_path"]=path; save_config(self.config); self._load_ora(path); self._set_status("Loaded new tnsnames.ora", ok=False)
+            self.current_ora_path = path
+            self.config["ora_path"] = path
+            save_config(self.config)
+            self._load_ora(path)
+            self._set_status("main.msg.loaded_tns", ok=False)
+
+
 
     def _load_ora(self, path):
         if not os.path.isfile(path):
@@ -294,7 +395,7 @@ class ToolVIP(tk.Tk):
         if items:
             self.cbo_conn.set(items[0]); self._on_pick_connection()
         else:
-            self._set_status("No items in configs/db_list.json", ok=False)
+            self._set_status("main.msg.no_config_items", ok=False)
 
     def _parse_display_item(self, disp: str):
         s = disp.strip()
@@ -325,18 +426,18 @@ class ToolVIP(tk.Tk):
         host=self.ent_host.get().strip(); port=self.ent_port.get().strip()
         data_src=self.ent_dsn.get().strip()
         if not (user and pwd and data_src):
-            messagebox.showwarning(APP_TITLE, "Thiếu thông tin kết nối."); return
+            messagebox.showwarning(APP_TITLE, self._t("main.msg.missing_credentials")); return
         dsn = f"{host}:{port}/{data_src}" if (self.var_use_host_port.get() and host and port) else data_src
 
         loading = tk.Toplevel(self)
         loading.title("Checking...")
         loading.resizable(False, False)
-        ttk.Label(loading, text="Checking connection...").grid(row=0, column=0, padx=12, pady=(12, 6))
+        ttk.Label(loading, text=self._t("main.msg.checking_connection")).grid(row=0, column=0, padx=12, pady=(12, 6))
         pb = ttk.Progressbar(loading, mode="indeterminate", length=220)
         pb.grid(row=1, column=0, padx=12, pady=(0, 12))
         pb.start(10)
 
-        # chặn người dùng tự đóng cửa sổ trong khi đang check
+        # cháº·n ngÆ°á»i dÃ¹ng tá»± Ä‘Ã³ng cá»­a sá»• trong khi Ä‘ang check
         loading.protocol("WM_DELETE_WINDOW", lambda: None)
 
         loading.transient(self)
@@ -347,7 +448,7 @@ class ToolVIP(tk.Tk):
         loading.geometry(f"+{x}+{y}")
 
         result = {"ok": False, "msg": ""}
-        _finished = {"v": False}  # guard chống gọi finish 2 lần
+        _finished = {"v": False}  # guard chá»‘ng gá»i finish 2 láº§n
 
         def worker():
             try:
@@ -367,7 +468,7 @@ class ToolVIP(tk.Tk):
             if _finished["v"]:
                 return
             _finished["v"] = True
-            # an toàn khi widget đã bị hủy
+            # an toÃ n khi widget Ä‘Ã£ bá»‹ há»§y
             try:
                 if pb.winfo_exists():
                     try:
@@ -383,18 +484,21 @@ class ToolVIP(tk.Tk):
                 pass
 
             if result["ok"]:
-                self._set_status(self._t("Kết nối thành công"), ok=True)
-                messagebox.showinfo(APP_TITLE, self._t("Kết nối thành công"))
+                self._set_status("main.msg.conn_success", ok=True)
+                messagebox.showinfo(APP_TITLE, self._t("main.msg.conn_success"))
             else:
-                self._set_status(self._t("Kết nối thất bại"), ok=False, details=result["msg"])
-                messagebox.showerror(APP_TITLE, f"{self._t('Kết nối thất bại')}: {result['msg'] or 'Không rõ lỗi.'}")
+                self._set_status("main.msg.conn_fail", ok=False, details=result["msg"])
+                messagebox.showerror(APP_TITLE, f"{self._t('main.msg.conn_fail')}: {result['msg'] or self._t('common.unknown_error')}")
 
         threading.Thread(target=worker, daemon=True).start()
 
 
-    def _set_status(self,text,ok=False,details:str|None=None):
-        f=tkfont.nametofont("TkDefaultFont").copy(); f.configure(weight="normal")
-        self.lbl_status.configure(text=text,font=f,foreground="black")
+    def _set_status(self, text_key, *, ok: bool = False, details: str | None = None, translate: bool = True) -> None:
+        text = self._t(text_key) if translate else text_key
+        self._status_custom = translate and text_key not in {"main.status.not_connected"}
+        font = tkfont.nametofont("TkDefaultFont").copy()
+        font.configure(weight="normal")
+        self.lbl_status.configure(text=text, font=font, foreground="black")
         self._last_error = details or ""
 
     def _on_toggle_hostport(self):
@@ -403,18 +507,27 @@ class ToolVIP(tk.Tk):
 
     def _show_error_details(self):
         if not self._last_error:
-            messagebox.showinfo(APP_TITLE, "Không có chi tiết lỗi."); return
-        win = tk.Toplevel(self); win.title(self._t("Chi tiết")); win.resizable(False, False)
+            messagebox.showinfo(APP_TITLE, self._t("main.msg.no_error_detail"))
+            return
+        win = tk.Toplevel(self)
+        win.title(self._t("main.popup.details_title"))
+        win.resizable(False, False)
         w, h = 820, 420
-        x = self.winfo_rootx() + (self.winfo_width() - w)//2
-        y = self.winfo_rooty() + (self.winfo_height() - h)//2
+        x = self.winfo_rootx() + (self.winfo_width() - w) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - h) // 2
         win.geometry(f"{w}x{h}+{x}+{y}")
-        frm = ttk.Frame(win, padding=10); frm.pack(fill="both", expand=True)
-        txt = ScrolledText(frm, wrap="word"); txt.pack(fill="both", expand=True)
-        txt.configure(fg="black"); txt.insert("1.0", self._last_error); txt.config(state="disabled")
-        ttk.Button(frm, text="Close", command=win.destroy).pack(anchor="e", pady=(8,0))
+        frm = ttk.Frame(win, padding=10)
+        frm.pack(fill="both", expand=True)
+        txt = ScrolledText(frm, wrap="word")
+        txt.pack(fill="both", expand=True)
+        txt.configure(fg="black")
+        txt.insert("1.0", self._last_error)
+        txt.config(state="disabled")
+        ttk.Button(frm, text=self._t("common.close"), command=win.destroy).pack(anchor="e", pady=(8, 0))
 
-    def _coming_soon(self): messagebox.showinfo(APP_TITLE,"Coming soon.")
+
+
+    def _coming_soon(self): messagebox.showinfo(APP_TITLE, self._t("main.msg.coming_soon"))
     def _edit_connection(self):
         initial = {
             "user": self.ent_user.get().strip(),
@@ -439,11 +552,11 @@ class ToolVIP(tk.Tk):
         user = self.ent_user.get().strip(); pwd  = self.ent_pass.get().strip()
         alias= self.ent_dsn.get().strip(); host = self.ent_host.get().strip(); port = self.ent_port.get().strip()
         if not (user and pwd and alias):
-            messagebox.showwarning(APP_TITLE, "Thiếu thông tin kết nối."); return
+            messagebox.showwarning(APP_TITLE, self._t("main.msg.missing_credentials")); return
         try:
             cmd_sql_plus.open_sqlplus(user, pwd, host, port, alias, self.var_use_host_port.get())
         except Exception as e:
-            messagebox.showerror(APP_TITLE, f"Lỗi mở SQL*Plus: {e}")
+            messagebox.showerror(APP_TITLE, f"Lá»—i má»Ÿ SQL*Plus: {e}")
 
     def _collect_connection_info(self) -> dict | None:
         user = self.ent_user.get().strip()
@@ -452,7 +565,7 @@ class ToolVIP(tk.Tk):
         host = self.ent_host.get().strip()
         port = self.ent_port.get().strip()
         if not user or not password or not alias:
-            messagebox.showwarning(APP_TITLE, "Vui lòng nhập User/Password/Data Source.")
+            messagebox.showwarning(APP_TITLE, self._t("main.msg.need_user_pass_alias"))
             return None
         return {
             "user": user,
@@ -479,21 +592,13 @@ class ToolVIP(tk.Tk):
         info = self._collect_connection_info()
         if not info:
             return
-        choice = messagebox.askyesnocancel(
-            APP_TITLE,
-            "Bạn muốn thực hiện Backup hay Restore?\nYes = Backup, No = Restore, Cancel = Hủy.",
-            parent=self,
-        )
+        choice = messagebox.askyesnocancel(APP_TITLE, self._t("main.ask.backup_mode"), parent=self)
         if choice is None:
             return
         if choice:
             backup_screen.open_backup_window(self, info)
             return
-        restore_choice = messagebox.askyesnocancel(
-            APP_TITLE,
-            "Restore từ bảng backup?\nYes = Bảng backup, No = CSV, Cancel = Hủy.",
-            parent=self,
-        )
+        restore_choice = messagebox.askyesnocancel(APP_TITLE, self._t("main.ask.restore_mode"), parent=self)
         if restore_choice is None:
             return
         if restore_choice:
@@ -501,16 +606,20 @@ class ToolVIP(tk.Tk):
         else:
             backup_screen.open_restore_from_csv_window(self, info)
 
+
+
     def _open_log_view_mu(self):
-        # đường dẫn tới script
-        script = resource_path(os.path.join("screen", "MU", "log_viewer.py"))
-        if not os.path.isfile(script):
-            messagebox.showerror(APP_TITLE, f"Không tìm thấy: {script}")
-            return
         try:
-            subprocess.Popen([sys.executable, script], shell=False, cwd=os.path.dirname(script))
+            log_viewer.open_log_viewer(self, ICON_PATH)
         except Exception as e:
-            messagebox.showerror(APP_TITLE, f"Lỗi mở log_viewer.py: {e}")
+            messagebox.showerror(APP_TITLE, f"Lá»—i má»Ÿ log viewer: {e}")
 
 def main(): app=ToolVIP(); app.mainloop()
 if __name__=="__main__": main()
+
+
+
+
+
+
+

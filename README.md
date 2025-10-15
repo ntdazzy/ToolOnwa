@@ -1,127 +1,133 @@
-# Hướng Dẫn Chạy Dự Án
+# ToolONWA VIP v1.0
 
-## 🪟 Trên Windows
+## Tổng quan
 
-### 1. Yêu cầu
+ToolONWA là ứng dụng desktop (Tkinter) hỗ trợ thao tác nhanh với cơ sở dữ liệu Oracle trong môi trường nội bộ.  
+Mục tiêu chính:
 
-- Đã cài **Python 3.10+**
-- Đã cài **Git** (nếu clone từ repo)
-- Đường dẫn Python đã được thêm vào **PATH**
+- Quản lý cấu hình kết nối Oracle (tnsnames, danh sách alias, tùy chọn kiểm tra kết nối).
+- Sinh và thực thi câu lệnh INSERT/UPDATE hàng loạt (bao gồm kiểm tra khóa chính, so sánh dữ liệu với DB).
+- Tạo/khôi phục backup bảng, import/export dữ liệu CSV.
+- Đọc log hệ thống MU, lọc theo màn hình, SQL/ERROR và xem chi tiết truy vấn.
+- Quản lý danh sách máy chủ RDS phục vụ thao tác kết nối nhanh.
 
-### 2. Tạo môi trường ảo
+Ứng dụng sử dụng cơ chế đa ngôn ngữ (Việt – Nhật) thông qua module `core/i18n.py`.
 
-Mở **CMD** hoặc **PowerShell** tại thư mục dự án (chứa `src`), sau đó chạy:
+## Chức năng chính
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-```
+- **Màn hình chính (`main.py`)**
+  - Chọn alias TNS, chỉnh sửa kết nối, kiểm tra trạng thái.
+  - Mở các màn hình tiện ích (Insert/Update/Backup, Log MU, RDS Info, SQL*Plus).
+  - Lựa chọn ngôn ngữ hiển thị, lưu cấu hình vào thư mục `configs/`.
 
-### 3. Nếu PowerShell báo lỗi policy
+- **Insert (`screen/DB/insert.py`)**
+  - Tải danh sách bảng người dùng, xem metadata, sinh câu lệnh INSERT theo dữ liệu nhập.
+  - Kiểm tra trùng khóa chính với DB, cho phép xóa dòng trùng trước khi ghi.
+  - Hỗ trợ nhập/xuất dữ liệu CSV.
 
-Chạy lệnh sau để cho phép script chạy:
+- **Update (`screen/DB/update.py`)**
+  - Tương tự Insert nhưng sinh câu lệnh UPDATE.
+  - Cho phép thêm điều kiện bổ sung bằng placeholder `{{COLUMN}}`.
 
-```bash
-Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
+- **Backup/Restore (`screen/DB/backup.py`)**
+  - Sinh script backup bảng, chạy trực tiếp và ghi log.
+  - Restore từ bảng backup hoặc từ CSV (kiểm tra header, ghi log từng bước).
 
-### 4. Cách build dự án
+- **Log Viewer MU (`screen/MU/log_viewer.py`)**
+  - Đọc file log, lọc theo màn hình, loại lệnh (SQL/ERROR), thời gian.
+  - Xem chi tiết SQL, Error, sao chép nội dung nhanh.
 
-Nếu có thêm màn hình mới, thêm dòng sau vào `build.bat`:
+- **RDS Info (`screen/General/rdsinfo.py`)**
+  - Quản lý danh sách subsystem/host RDS, hỗ trợ xem/copy nhanh thông tin.
 
-```
---hidden-import <tên_màn_hình_mới>
-```
 
-Sau đó chạy `build.bat` để build.
+## Yêu cầu hệ thống
 
-### 5. Nếu báo thiếu driver khi bấm "Check Connection"
+- Python 3.11 (khuyến nghị 3.10+)
+- Windows/macOS/Linux (đã kiểm thử trên Windows 10/11, Ubuntu 22.04, macOS Ventura với Python từ hệ thống hoặc Homebrew).
+- Gói bổ sung (cài qua `pip`):
+  - `oracledb` hoặc `cx_Oracle` nếu cần kết nối Oracle thực.
+  - `pyinstaller` (chỉ khi build file .exe).
+  - Các gói chuẩn khác sử dụng trong dự án (nếu có) – khuyến nghị giữ file `requirements.txt` để cài tự động.
 
-Cài thêm thư viện Oracle:
 
-```bash
-pip install oracledb
-```
+## Hướng dẫn thiết lập & chạy
 
-Hoặc nếu vẫn lỗi:
+### 1. Trên Windows (CMD hoặc PowerShell)
 
-```bash
-pip install cx_Oracle
-```
+1. **Cài đặt Python 3.11** (nhớ chọn “Add to PATH”).
+2. **Tạo môi trường ảo**:
+   ```bash
+   cd đường_dẫn_tới_thư_mục_project
+   python -m venv .venv
+   .venv\Scripts\activate
+   ```
+   Nếu PowerShell chặn script, chạy `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`.
+3. **Cài đặt thư viện**:
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt      # sử dụng file đã cung cấp
+   ```
+4. **Chạy ứng dụng**:
+   ```bash
+   python main.py
+   ```
+5. **Build file .exe** (tùy chọn):
+   - Chạy `build.bat`, file kết quả nằm trong `dist/ToolONWA.exe`.
 
----
+### 2. Trên macOS
 
-## 🐧 Trên Ubuntu / WSL
+1. **Cài Python 3.11** (ví dụ: `brew install python@3.11`).
+2. **Tạo môi trường ảo**:
+   ```bash
+   cd /đường/dẫn/tới/project
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+3. **Cài thư viện**:
+   ```bash
+   pip install --upgrade pip
+    pip install -r requirements.txt
+   ```
+   *Lưu ý:* nếu dùng `oracledb/cx_Oracle`, cần cài Instant Client của Oracle hoặc cấu hình phù hợp.
+4. **Chạy chương trình**:
+   ```bash
+   python main.py
+   ```
+5. **Thoát môi trường ảo**: `deactivate`.
 
-### 1. Cài đặt Python và module venv
+### 3. Trên Ubuntu / Debian
 
-```bash
-sudo apt update
-sudo apt install python3 python3-venv -y
-```
+1. **Cài Python và venv**:
+   ```bash
+   sudo apt update
+   sudo apt install python3 python3-venv python3-pip -y
+   ```
+2. **Tạo môi trường ảo**:
+   ```bash
+   cd ~/project/ToolONWA
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+3. **Cài thư viện**:
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+4. **Chạy ứng dụng**:
+   ```bash
+   python main.py
+   ```
+5. (Tùy chọn) Tạo alias `python=python3` trong `~/.bashrc`:
+   ```bash
+   echo "alias python=python3" >> ~/.bashrc
+   source ~/.bashrc
+   ```
 
-### 2. Tạo môi trường ảo
+### Ghi chú chung
 
-Tại thư mục dự án (ví dụ: `~/Tools/ToolOnwa`):
+- Môi trường sản xuất nên đặt log, cấu hình, templates trong `configs/` (tự động tạo nếu chưa có).
+- Khi dùng Oracle thật, cần đảm bảo máy có thể truy cập TNS/tnsnames.ora, driver Oracle đầy đủ.
+- Nếu build cross-platform (ví dụ build .exe trên macOS/Linux) cần dùng PyInstaller tương ứng và cấu hình icon/asset phù hợp.
 
-```bash
-python3 -m venv .venv
-```
-
-### 3. Kích hoạt môi trường ảo
-
-```bash
-source .venv/bin/activate
-```
-
-Khi kích hoạt thành công, bạn sẽ thấy tiền tố:
-
-```
-(.venv) ntd@DESKTOP-MLDRP0U:~/Tools/ToolOnwa$
-```
-
-### 4. Cài đặt thư viện cần thiết
-
-```bash
-pip install -r requirements.txt
-```
-
-Hoặc cài riêng:
-
-```bash
-pip install requests pandas
-```
-
-### 5. Chạy chương trình
-
-```bash
-python main.py
-```
-
-### 6. Thoát khỏi môi trường ảo
-
-```bash
-deactivate
-```
-
-### 7. Gợi ý bổ sung
-
-Nếu muốn alias `python` trỏ tới `python3`, chạy:
-
-```bash
-echo "alias python=python3" >> ~/.bashrc
-source ~/.bashrc
-```
-
----
-
-## 🧰 Chức năng cơ sở dữ liệu
-
-- **Insert**: chọn bảng bằng khung tìm kiếm, dán/nhập dữ liệu trực tiếp vào lưới, xuất/nhập CSV và tạo câu lệnh `INSERT`. Công cụ kiểm tra khóa chính trùng với database, hiển thị màn hình so sánh và (nếu đồng ý) xóa/insert lại.
-- **Update**: thao tác giống Insert nhưng sinh câu `UPDATE` với điều kiện xác định theo khóa chính hoặc biểu thức `{{COLUMN}}` trong khung điều kiện.
-- **Backup/Restore**:
-  - Bấm `Backup/Restore` ở màn hình chính → chọn `Backup` hoặc `Restore`.
-  - **Backup**: tự động gợi ý tên bảng sao lưu dạng `_BK_YYYYMMDD`; có thể chỉnh sửa SQL (ví dụ thêm `WHERE`) trước khi thực thi và xem log ngay trên màn hình.
-  - **Restore từ bảng backup**: sinh sẵn câu `TRUNCATE` + `INSERT` từ bảng backup. Người dùng có thể chỉnh sửa SQL rồi chạy.
-  - **Restore từ CSV**: bắt buộc chọn bảng đích trước khi import. Công cụ kiểm tra header trùng khớp cột trong bảng, hiển thị dữ liệu trong lưới để xác nhận và log chi tiết khi ghi vào database.
-- Trong mọi màn hình, dữ liệu có thể copy kèm header, thay đổi thứ tự cột, nhập xuất CSV và xem log ngay tại chỗ.
+Chúc bạn sử dụng ToolONWA hiệu quả!

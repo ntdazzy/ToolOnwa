@@ -1,0 +1,4 @@
+oracledb
+cx-Oracle
+pyinstaller
+requests

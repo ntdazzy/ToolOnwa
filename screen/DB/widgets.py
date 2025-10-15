@@ -20,6 +20,64 @@ def _normalize_headers(headers: Sequence[str]) -> List[str]:
     return [str(h).strip() for h in headers]
 
 
+class LoadingPopup:
+    """
+    Simple modal dialog with an indeterminate progress bar.
+    """
+
+    def __init__(self, parent: tk.Widget, message: str = "Đang tải..."):
+        self._parent = parent
+        self._window = tk.Toplevel(parent)
+        self._window.transient(parent)
+        self._window.title("Loading")
+        self._window.resizable(False, False)
+        self._window.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        frame = ttk.Frame(self._window, padding=16)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text=message, anchor="center").pack(fill="x")
+        self._progress = ttk.Progressbar(frame, mode="indeterminate", length=220)
+        self._progress.pack(fill="x", pady=(12, 0))
+        self._progress.start(12)
+
+        try:
+            parent.update_idletasks()
+            self._window.update_idletasks()
+            w = self._window.winfo_width()
+            h = self._window.winfo_height()
+            if w == 1 and h == 1:
+                w = self._window.winfo_reqwidth()
+                h = self._window.winfo_reqheight()
+            x = parent.winfo_rootx() + (parent.winfo_width() - w) // 2
+            y = parent.winfo_rooty() + (parent.winfo_height() - h) // 2
+            self._window.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+        try:
+            self._window.grab_set()
+        except Exception:
+            pass
+
+    def close(self):
+        try:
+            if self._progress:
+                self._progress.stop()
+        except Exception:
+            pass
+        if self._window:
+            try:
+                self._window.grab_release()
+            except Exception:
+                pass
+            try:
+                self._window.destroy()
+            except Exception:
+                pass
+        self._window = None
+        self._progress = None
+
+
 class EditableTreeview(ttk.Treeview):
     """
     Treeview with in-place editing and clipboard support.

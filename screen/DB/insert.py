@@ -10,7 +10,10 @@ from tkinter.scrolledtext import ScrolledText
 from typing import Dict, List, Optional
 
 from screen.DB import db_utils
-from screen.DB.widgets import ColumnOrderDialog, DataGrid, DuplicatePreviewDialog
+from screen.DB.widgets import ColumnOrderDialog, DataGrid, DuplicatePreviewDialog, LoadingPopup
+from core import i18n
+
+APP_TITLE = "Tool VIP"
 
 
 class InsertWindow(tk.Toplevel):
@@ -20,18 +23,24 @@ class InsertWindow(tk.Toplevel):
         self.conn_info = connection
         self.conn = None
         self.current_owner = connection.get("user", "").upper()
-        self.title("Insert")
+        self.title(i18n.translate("insert.title"))
         self.geometry("1180x720")
         self.minsize(960, 600)
         self.resizable(True, True)
 
-        self._tables_all: List[str] = []
+        self._table_items: List[Dict[str, str]] = []
+        self._table_view: List[Dict[str, str]] = []
+        self._active_table: Optional[Dict[str, str]] = None
         self._columns: List[str] = []
         self._column_meta: Dict[str, dict] = {}
         self._pk_columns: List[str] = []
         self._generated_rows: List[Dict[str, str]] = []
+        self._loader: Optional[LoadingPopup] = None
 
         self._build_ui()
+        self._lang_listener = self._handle_language_change
+        i18n.add_listener(self._lang_listener)
+        self._apply_language()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._connect_async)
 
@@ -44,9 +53,8 @@ class InsertWindow(tk.Toplevel):
 
         top = ttk.Frame(main)
         top.grid(row=0, column=0, sticky="ew")
-        top.columnconfigure(0, weight=1)
-        top.columnconfigure(1, weight=0)
-        top.columnconfigure(2, weight=0)
+        for index in range(3):
+            top.columnconfigure(index, weight=0 if index else 1)
 
         self._build_search(top)
         self._build_actions(top)
@@ -60,59 +68,87 @@ class InsertWindow(tk.Toplevel):
         self.grid = DataGrid(middle)
         self.grid.grid(row=0, column=0, sticky="nsew")
 
-        btn_bar = ttk.Frame(middle)
-        btn_bar.grid(row=1, column=0, sticky="e", pady=(6, 0))
-        ttk.Button(btn_bar, text="Import CSV", command=self.grid.import_csv_dialog).pack(side="left", padx=4)
-        ttk.Button(btn_bar, text="Export CSV", command=self.grid.export_csv_dialog).pack(side="left", padx=4)
-        ttk.Button(btn_bar, text="Thêm dòng trống", command=lambda: self.grid.append_dict({})).pack(side="left", padx=4)
+        self.btn_bar = ttk.Frame(middle)
+        self.btn_bar.grid(row=1, column=0, sticky="e", pady=(6, 0))
+        ttk.Button(self.btn_bar, text=self._t("insert.btn.import_csv"), command=self.grid.import_csv_dialog).pack(side="left", padx=4)
+        ttk.Button(self.btn_bar, text=self._t("insert.btn.export_csv"), command=self.grid.export_csv_dialog).pack(side="left", padx=4)
+        ttk.Button(self.btn_bar, text=self._t("insert.btn.add_row"), command=lambda: self.grid.append_dict({})).pack(side="left", padx=4)
 
-        bottom = ttk.LabelFrame(main, text="Insert into ...", padding=6)
-        bottom.grid(row=2, column=0, sticky="nsew")
-        bottom.rowconfigure(0, weight=1)
-        bottom.columnconfigure(0, weight=1)
+        self.frm_sql = ttk.LabelFrame(main, text=self._t("insert.section.sql", table="..."), padding=6)
+        self.frm_sql.grid(row=2, column=0, sticky="nsew")
+        self.frm_sql.rowconfigure(0, weight=1)
+        self.frm_sql.columnconfigure(0, weight=1)
 
-        self.txt_sql = ScrolledText(bottom, height=8, wrap="word")
+        self.txt_sql = ScrolledText(self.frm_sql, height=8, wrap="word")
         self.txt_sql.grid(row=0, column=0, sticky="nsew")
 
+
     def _build_search(self, parent: ttk.Frame):
-        grp = ttk.LabelFrame(parent, text="Tìm kiếm", padding=6)
-        grp.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        grp.columnconfigure(0, weight=1)
-        ttk.Label(grp, text="Table Name").grid(row=0, column=0, sticky="w")
+        self.grp_search = ttk.LabelFrame(parent, text=self._t("insert.section.search"), padding=6)
+        self.grp_search.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.grp_search.columnconfigure(0, weight=1)
+
+        self.lbl_table_name = ttk.Label(self.grp_search, text=self._t("insert.label.table_name"))
+        self.lbl_table_name.grid(row=0, column=0, sticky="w")
         self.var_search = tk.StringVar()
-        ent = ttk.Entry(grp, textvariable=self.var_search)
-        ent.grid(row=1, column=0, sticky="ew", pady=4)
-        ent.bind("<KeyRelease>", lambda e: self._filter_tables())
-        self.list_tables = tk.Listbox(grp, height=10)
+        entry = ttk.Entry(self.grp_search, textvariable=self.var_search)
+        entry.grid(row=1, column=0, sticky="ew", pady=4)
+        entry.bind("<KeyRelease>", lambda _event: self._filter_tables())
+        self.list_tables = tk.Listbox(self.grp_search, height=10)
         self.list_tables.grid(row=2, column=0, sticky="nsew", pady=(0, 4))
-        self.list_tables.bind("<<ListboxSelect>>", lambda e: self._on_select_table())
-        grp.rowconfigure(2, weight=1)
+        self.list_tables.bind("<<ListboxSelect>>", self._on_select_table)
+        self.grp_search.rowconfigure(2, weight=1)
+
+
 
     def _build_actions(self, parent: ttk.Frame):
-        grp = ttk.LabelFrame(parent, text="Chức năng", padding=6)
-        grp.grid(row=0, column=1, sticky="n", padx=(0, 8))
-        ttk.Button(grp, text="Tạo câu Insert", command=self._generate_sql).grid(row=0, column=0, sticky="ew", pady=4)
-        ttk.Button(grp, text="Copy", command=self._copy_sql).grid(row=1, column=0, sticky="ew", pady=4)
-        ttk.Button(grp, text="Thay đổi vị trí cột", command=self._change_column_order).grid(row=2, column=0, sticky="ew", pady=4)
-        ttk.Button(grp, text="Thực thi", command=self._execute).grid(row=3, column=0, sticky="ew", pady=4)
-        ttk.Button(grp, text="Clear", command=self._clear).grid(row=4, column=0, sticky="ew", pady=4)
+        self.grp_actions = ttk.LabelFrame(parent, text=self._t("insert.section.actions"), padding=6)
+        self.grp_actions.grid(row=0, column=1, sticky="n", padx=(0, 8))
+        self.btn_build_sql = ttk.Button(self.grp_actions, text=self._t("insert.btn.build_sql"), command=self._generate_sql)
+        self.btn_build_sql.grid(row=0, column=0, sticky="ew", pady=4)
+        self.btn_copy = ttk.Button(self.grp_actions, text=self._t("common.copy"), command=self._copy_sql)
+        self.btn_copy.grid(row=1, column=0, sticky="ew", pady=4)
+        self.btn_reorder = ttk.Button(self.grp_actions, text=self._t("insert.btn.reorder"), command=self._change_column_order)
+        self.btn_reorder.grid(row=2, column=0, sticky="ew", pady=4)
+        self.btn_execute = ttk.Button(self.grp_actions, text=self._t("insert.btn.execute"), command=self._execute)
+        self.btn_execute.grid(row=3, column=0, sticky="ew", pady=4)
+        self.btn_clear = ttk.Button(self.grp_actions, text=self._t("insert.btn.clear"), command=self._clear)
+        self.btn_clear.grid(row=4, column=0, sticky="ew", pady=4)
+
+
 
     def _build_connection(self, parent: ttk.Frame):
-        grp = ttk.LabelFrame(parent, text="Thông Tin Kết Nối", padding=6, width=240)
-        grp.grid(row=0, column=2, sticky="n")
-        labels = {
-            "User ID": self.conn_info.get("user", ""),
-            "Data Source": self.conn_info.get("alias", ""),
-            "Host": self.conn_info.get("host", ""),
-            "Port": self.conn_info.get("port", ""),
-        }
-        for idx, (label, value) in enumerate(labels.items()):
-            ttk.Label(grp, text=label).grid(row=idx, column=0, sticky="w", pady=2)
-            ent = ttk.Entry(grp)
-            ent.insert(0, value)
-            ent.configure(state="readonly")
-            ent.grid(row=idx, column=1, sticky="ew", pady=2, padx=(6, 0))
-        grp.columnconfigure(1, weight=1)
+        self.grp_connection = ttk.LabelFrame(parent, text=self._t("insert.section.connection"), padding=6, width=240)
+        self.grp_connection.grid(row=0, column=2, sticky="n")
+
+        self.lbl_user = ttk.Label(self.grp_connection, text=self._t("main.label.user_id"))
+        self.lbl_user.grid(row=0, column=0, sticky="w", pady=2)
+        entry_user = ttk.Entry(self.grp_connection)
+        entry_user.insert(0, self.conn_info.get("user", ""))
+        entry_user.configure(state="readonly")
+        entry_user.grid(row=0, column=1, sticky="ew", pady=2, padx=(6, 0))
+
+        self.lbl_datasource = ttk.Label(self.grp_connection, text=self._t("main.label.data_source"))
+        self.lbl_datasource.grid(row=1, column=0, sticky="w", pady=2)
+        entry_alias = ttk.Entry(self.grp_connection)
+        entry_alias.insert(0, self.conn_info.get("alias", ""))
+        entry_alias.configure(state="readonly")
+        entry_alias.grid(row=1, column=1, sticky="ew", pady=2, padx=(6, 0))
+
+        self.lbl_hostport = ttk.Label(self.grp_connection, text=self._t("main.label.host_port"))
+        self.lbl_hostport.grid(row=2, column=0, sticky="w", pady=2)
+        entry_host = ttk.Entry(self.grp_connection)
+        entry_host.insert(0, self.conn_info.get("host", ""))
+        entry_host.configure(state="readonly")
+        entry_host.grid(row=2, column=1, sticky="ew", pady=2, padx=(6, 0))
+        entry_port = ttk.Entry(self.grp_connection, width=8)
+        entry_port.insert(0, self.conn_info.get("port", ""))
+        entry_port.configure(state="readonly")
+        entry_port.grid(row=2, column=2, sticky="w", pady=2, padx=(3, 0))
+
+        self.grp_connection.columnconfigure(1, weight=1)
+
+
 
     # ------------------------------------------------------------------
     def _connect_async(self):
@@ -132,52 +168,86 @@ class InsertWindow(tk.Toplevel):
                 self.after(0, lambda m=msg: self._show_error(m))
                 return
             except Exception as exc:
-                msg = f"Lỗi kết nối: {exc}"
+                msg = f"{self._t("insert.msg.metadata_error", error=str(exc))}"
                 self.after(0, lambda m=msg: self._show_error(m))
                 return
             self.after(0, lambda: self._init_tables(tables))
 
+        self._show_loading(self._t("common.loading_tables"))
         threading.Thread(target=worker, daemon=True).start()
 
+
     def _show_error(self, msg: str):
-        messagebox.showerror("Tool VIP", msg, parent=self)
+        self._hide_loading()
+        messagebox.showerror(APP_TITLE, msg, parent=self)
         self.destroy()
 
     def _init_tables(self, tables: List[str]):
-        self._tables_all = tables
+        self._hide_loading()
+        items: List[Dict[str, str]] = []
+        for raw in tables:
+            owner, name = db_utils.split_owner_table(raw, self.current_owner)
+            full = f"{owner}.{name}"
+            items.append({"full": full, "display": name, "owner": owner, "table": name})
+        items.sort(key=lambda it: (it["display"], it["owner"]))
+        self._table_items = items
+        self._table_view = list(items)
         self.list_tables.delete(0, tk.END)
-        for tbl in tables:
-            self.list_tables.insert(tk.END, tbl)
-        if tables:
+        for item in self._table_view:
+            self.list_tables.insert(tk.END, item["display"])
+        if self._table_view:
             self.list_tables.selection_set(0)
             self._on_select_table()
+        else:
+            self._active_table = None
+            self.frm_sql.config(text=self._t("insert.section.sql", table="..."))
 
     # ------------------------------------------------------------------
     def _filter_tables(self):
         keyword = self.var_search.get().strip().upper()
+        current_full = self._active_table["full"] if self._active_table else None
+        if keyword:
+            view = [item for item in self._table_items if keyword in item["display"].upper()]
+        else:
+            view = list(self._table_items)
+        self._table_view = view
         self.list_tables.delete(0, tk.END)
-        for tbl in self._tables_all:
-            if not keyword or keyword in tbl.upper():
-                self.list_tables.insert(tk.END, tbl)
+        selected_index = None
+        for idx, item in enumerate(view):
+            self.list_tables.insert(tk.END, item["display"])
+            if item["full"] == current_full:
+                selected_index = idx
+        if selected_index is not None:
+            self.list_tables.selection_set(selected_index)
+        elif view:
+            self.list_tables.selection_set(0)
+            self._on_select_table()
+        else:
+            self._active_table = None
+            self.grid.clear()
+            self.txt_sql.delete("1.0", tk.END)
 
-    def _on_select_table(self):
+    def _on_select_table(self, _event=None):
         selection = self.list_tables.curselection()
         if not selection:
             return
         index = selection[0]
-        table = self.list_tables.get(index)
-        if not table:
+        if index >= len(self._table_view):
             return
-        self._load_table_metadata(table)
+        item = self._table_view[index]
+        if self._active_table and self._active_table["full"] == item["full"]:
+            return
+        self._active_table = item
+        self._load_table_metadata(item)
 
-    def _load_table_metadata(self, table: str):
+    def _load_table_metadata(self, item: Dict[str, str]):
         if not self.conn:
             return
         try:
-            columns = db_utils.fetch_table_columns(self.conn, table, self.current_owner)
-            pk_cols = db_utils.fetch_primary_keys(self.conn, table, self.current_owner)
+            columns = db_utils.fetch_table_columns(self.conn, item["full"], self.current_owner)
+            pk_cols = db_utils.fetch_primary_keys(self.conn, item["full"], self.current_owner)
         except Exception as exc:
-            messagebox.showerror("Tool VIP", f"Lỗi đọc metadata: {exc}", parent=self)
+            messagebox.showerror(APP_TITLE, self._t("insert.msg.metadata_error", error=str(exc)), parent=self)
             return
         self._columns = [col["column_name"] for col in columns]
         self._column_meta = {col["column_name"]: col for col in columns}
@@ -186,24 +256,23 @@ class InsertWindow(tk.Toplevel):
         self.grid.clear()
         self.grid.append_dict({})
         self._generated_rows.clear()
-        self._set_sql_label(table)
+        self._set_sql_label(item["display"])
 
-    def _set_sql_label(self, table: str):
-        frame: ttk.LabelFrame = self.txt_sql.master  # type: ignore[assignment]
-        frame.configure(text=f"Insert into {table}")
+    def _set_sql_label(self, table_display: str):
+        self.frm_sql.config(text=self._t("insert.section.sql", table=table_display))
 
     # ------------------------------------------------------------------
     def _generate_sql(self):
         rows = self.grid.get_all()
         if not rows:
-            messagebox.showwarning("Tool VIP", "Không có dữ liệu để tạo insert.", parent=self)
+            messagebox.showwarning(APP_TITLE, self._t("insert.msg.no_data_generate"), parent=self)
             return
         if not self._columns:
-            messagebox.showwarning("Tool VIP", "Chưa chọn bảng.", parent=self)
+            messagebox.showwarning(APP_TITLE, self._t("insert.msg.no_table"), parent=self)
             return
         table = self._current_table()
         if not table:
-            messagebox.showwarning("Tool VIP", "Chưa chọn bảng.", parent=self)
+            messagebox.showwarning(APP_TITLE, self._t("insert.msg.no_table"), parent=self)
             return
         column_list = ", ".join(self._columns)
         sql_lines: List[str] = []
@@ -219,8 +288,9 @@ class InsertWindow(tk.Toplevel):
             sql_lines.append(f"INSERT INTO {table} ({column_list}) VALUES ({', '.join(values)});")
             formatted_rows.append(row)
         self.txt_sql.delete("1.0", tk.END)
-        self.txt_sql.insert(tk.END, "\n".join(sql_lines))
+        self.txt_sql.insert(tk.END, "".join(sql_lines))
         self._generated_rows = formatted_rows
+
 
     def _copy_sql(self):
         data = self.txt_sql.get("1.0", tk.END).strip()
@@ -228,11 +298,12 @@ class InsertWindow(tk.Toplevel):
             return
         self.clipboard_clear()
         self.clipboard_append(data)
-        messagebox.showinfo("Tool VIP", "Đã copy câu insert.", parent=self)
+        messagebox.showinfo(APP_TITLE, self._t("insert.msg.copy_done"), parent=self)
+
 
     def _change_column_order(self):
         if not self._columns:
-            messagebox.showwarning("Tool VIP", "Chưa có cột để thay đổi.", parent=self)
+            messagebox.showwarning(APP_TITLE, self._t("insert.msg.no_columns_update"), parent=self)
             return
         current_rows = self.grid.get_all()
         dlg = ColumnOrderDialog(self, self._columns)
@@ -245,36 +316,34 @@ class InsertWindow(tk.Toplevel):
                 self.grid.append_dict(row)
             self._generated_rows = current_rows
 
+
     def _clear(self):
-        if not messagebox.askyesno("Tool VIP", "Bạn có muốn reset dữ liệu không?", parent=self):
+        if not messagebox.askyesno(APP_TITLE, self._t("insert.msg.clear_confirm"), parent=self):
             return
         self.grid.clear()
         self.grid.append_dict({})
         self.txt_sql.delete("1.0", tk.END)
         self._generated_rows.clear()
 
+
     def _execute(self):
         table = self._current_table()
         if not table:
-            messagebox.showwarning("Tool VIP", "Chưa chọn bảng.", parent=self)
+            messagebox.showwarning(APP_TITLE, self._t("insert.msg.no_table"), parent=self)
             return
         rows = self.grid.get_all()
         if not rows:
-            messagebox.showwarning("Tool VIP", "Không có dữ liệu để insert.", parent=self)
+            messagebox.showwarning(APP_TITLE, self._t("insert.msg.no_data_execute"), parent=self)
             return
-        if not messagebox.askyesno("Tool VIP", "Thực thi insert?", parent=self):
+        if not messagebox.askyesno(APP_TITLE, self._t("insert.msg.confirm_execute"), parent=self):
             return
         if not self.conn:
-            messagebox.showerror("Tool VIP", "Chưa kết nối database.", parent=self)
+            messagebox.showerror(APP_TITLE, self._t("insert.msg.not_connected"), parent=self)
             return
         pk_cols = self._pk_columns
         pk_missing = [row for row in rows if any(not row.get(pk) for pk in pk_cols)]
         if pk_cols and pk_missing:
-            if not messagebox.askyesno(
-                "Tool VIP",
-                "Một số dòng thiếu giá trị khóa chính, vẫn tiếp tục insert?",
-                parent=self,
-            ):
+            if not messagebox.askyesno(APP_TITLE, self._t("insert.msg.pk_missing_confirm"), parent=self):
                 return
         duplicates = {}
         try:
@@ -286,7 +355,7 @@ class InsertWindow(tk.Toplevel):
                     keys.append([row.get(pk) for pk in pk_cols])
                 duplicates = db_utils.fetch_rows_by_pk(self.conn, table, self.current_owner, pk_cols, keys)
         except Exception as exc:
-            messagebox.showerror("Tool VIP", f"Lỗi kiểm tra trùng: {exc}", parent=self)
+            messagebox.showerror(APP_TITLE, self._t("insert.msg.check_duplicates_error", error=str(exc)), parent=self)
             return
 
         if duplicates:
@@ -315,7 +384,7 @@ class InsertWindow(tk.Toplevel):
                     duplicates.keys(),
                 )
             except Exception as exc:
-                messagebox.showerror("Tool VIP", f"Lỗi xóa dữ liệu cũ: {exc}", parent=self)
+                messagebox.showerror(APP_TITLE, self._t("insert.msg.delete_old_error", error=str(exc)), parent=self)
                 return
 
         try:
@@ -324,24 +393,84 @@ class InsertWindow(tk.Toplevel):
                 ordered_rows.append([row.get(col) if row.get(col) != "" else None for col in self._columns])
             db_utils.insert_rows(self.conn, table, self.current_owner, self._columns, ordered_rows)
         except Exception as exc:
-            messagebox.showerror("Tool VIP", f"Lỗi insert: {exc}", parent=self)
+            messagebox.showerror(APP_TITLE, self._t("insert.msg.insert_error", error=str(exc)), parent=self)
             return
-        messagebox.showinfo("Tool VIP", "Insert thành công.", parent=self)
+        messagebox.showinfo(APP_TITLE, self._t("insert.msg.insert_success"), parent=self)
+
 
     # ------------------------------------------------------------------
     def _current_table(self) -> Optional[str]:
-        selection = self.list_tables.curselection()
-        if not selection:
+        if not self._active_table:
             return None
-        return self.list_tables.get(selection[0])
+        return self._active_table["full"]
 
     def _on_close(self):
+        self._hide_loading()
         try:
             if self.conn:
                 self.conn.close()
         except Exception:
             pass
         self.destroy()
+
+    def destroy(self):
+        if hasattr(self, "_lang_listener"):
+            i18n.remove_listener(self._lang_listener)
+        super().destroy()
+
+    def _show_loading(self, message: str):
+        if self._loader:
+            return
+        self._loader = LoadingPopup(self, message)
+
+    def _hide_loading(self):
+        if not self._loader:
+            return
+        self._loader.close()
+        self._loader = None
+
+    def _handle_language_change(self, _lang: str) -> None:
+        self._apply_language()
+
+    def _apply_language(self) -> None:
+        self.title(self._t("insert.title"))
+        if hasattr(self, "grp_search"):
+            self.grp_search.config(text=self._t("insert.section.search"))
+        if hasattr(self, "lbl_table_name"):
+            self.lbl_table_name.config(text=self._t("insert.label.table_name"))
+        if hasattr(self, "grp_actions"):
+            self.grp_actions.config(text=self._t("insert.section.actions"))
+        if hasattr(self, "btn_build_sql"):
+            self.btn_build_sql.config(text=self._t("insert.btn.build_sql"))
+        if hasattr(self, "btn_copy"):
+            self.btn_copy.config(text=self._t("common.copy"))
+        if hasattr(self, "btn_reorder"):
+            self.btn_reorder.config(text=self._t("insert.btn.reorder"))
+        if hasattr(self, "btn_execute"):
+            self.btn_execute.config(text=self._t("insert.btn.execute"))
+        if hasattr(self, "btn_clear"):
+            self.btn_clear.config(text=self._t("insert.btn.clear"))
+        if hasattr(self, "grp_connection"):
+            self.grp_connection.config(text=self._t("insert.section.connection"))
+        if hasattr(self, "lbl_user"):
+            self.lbl_user.config(text=self._t("main.label.user_id"))
+        if hasattr(self, "lbl_datasource"):
+            self.lbl_datasource.config(text=self._t("main.label.data_source"))
+        if hasattr(self, "lbl_hostport"):
+            self.lbl_hostport.config(text=self._t("main.label.host_port"))
+        if hasattr(self, "btn_bar"):
+            for child, key in [
+                (self.btn_bar.winfo_children()[0], "insert.btn.import_csv"),
+                (self.btn_bar.winfo_children()[1], "insert.btn.export_csv"),
+                (self.btn_bar.winfo_children()[2], "insert.btn.add_row"),
+            ]:
+                child.config(text=self._t(key))
+        current_display = self._active_table["display"] if self._active_table else "..."
+        if hasattr(self, "frm_sql"):
+            self.frm_sql.config(text=self._t("insert.section.sql", table=current_display))
+
+    def _t(self, key: str, **kwargs) -> str:
+        return i18n.translate(key, **kwargs)
 
 
 def open_insert_window(parent: tk.Widget, connection: Dict[str, str]):

@@ -115,6 +115,13 @@ def _split_owner_table(raw_name: str, default_owner: str) -> tuple[str, str]:
     return default_owner.upper(), raw_name.strip().upper()
 
 
+def split_owner_table(raw_name: str, default_owner: str) -> tuple[str, str]:
+    """
+    Public wrapper so UI layers can consistently resolve owner/table pairs.
+    """
+    return _split_owner_table(raw_name, default_owner)
+
+
 def fetch_accessible_tables(
     conn,
     *,
@@ -177,10 +184,10 @@ def fetch_table_columns(conn, table_name: str, default_owner: str) -> List[Dict[
     owner, table = _split_owner_table(table_name, default_owner)
     sql = (
         "SELECT column_name, data_type, data_length, data_precision, data_scale, nullable, column_id "
-        "FROM all_tab_columns WHERE owner = :owner AND table_name = :table ORDER BY column_id"
+        "FROM all_tab_columns WHERE owner = :owner AND table_name = :tbl ORDER BY column_id"
     )
     with contextlib.closing(conn.cursor()) as cur:
-        cur.execute(sql, {"owner": owner, "table": table})
+        cur.execute(sql, {"owner": owner, "tbl": table})
         return [
             {
                 "column_name": str(row[0]),
@@ -201,11 +208,11 @@ def fetch_primary_keys(conn, table_name: str, default_owner: str) -> List[str]:
         "SELECT acc.column_name FROM all_constraints ac "
         "JOIN all_cons_columns acc "
         "ON ac.owner = acc.owner AND ac.constraint_name = acc.constraint_name "
-        "WHERE ac.constraint_type = 'P' AND ac.owner = :owner AND ac.table_name = :table "
+        "WHERE ac.constraint_type = 'P' AND ac.owner = :owner AND ac.table_name = :tbl "
         "ORDER BY acc.position"
     )
     with contextlib.closing(conn.cursor()) as cur:
-        cur.execute(sql, {"owner": owner, "table": table})
+        cur.execute(sql, {"owner": owner, "tbl": table})
         return [str(row[0]) for row in cur]
 
 

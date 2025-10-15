@@ -24,7 +24,20 @@ pyinstaller main.py ^
   --add-data "icons;icons" ^
   --add-data "screen;screen" ^
   --hidden-import screen.DB.edit_connection ^
-  --hidden-import screen.DB.cmd_sql_plus
+  --hidden-import screen.DB.cmd_sql_plus ^
+  --hidden-import screen.DB.backup ^
+  --hidden-import screen.DB.compare ^
+  --hidden-import screen.DB.db_utils ^
+  --hidden-import screen.DB.insert ^
+  --hidden-import screen.DB.update ^
+  --hidden-import screen.DB.widgets ^
+  --hidden-import screen.General.bikipvocong ^
+  --hidden-import screen.General.rdsinfo ^
+  --hidden-import screen.General.tailieu ^
+  --hidden-import screen.MU.log_viewer ^
+  --hidden-import core.i18n ^
+  --hidden-import core.history ^
+  --hidden-import core.templates
 
 echo.
 echo === DONE ===

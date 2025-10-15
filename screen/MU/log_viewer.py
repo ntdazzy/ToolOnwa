@@ -1,7 +1,10 @@
 # log_viewer.py
+import os
 import re
+import sys
 import tkinter as tk
 from dataclasses import dataclass
+from pathlib import Path
 from tkinter import filedialog, ttk, messagebox
 from typing import List, Optional, Sequence, Tuple
 
@@ -12,6 +15,16 @@ THREAD_RE = re.compile(r"--- \[([^\]]+)\]")
 REQUEST_RE = re.compile(r"(?:GET|POST|PUT|DELETE)\s+/(MU[A-Z]{2}\d{4})")
 
 # Mapping of thread to last seen screen ID
+
+BASE_DIR = Path(__file__).resolve().parent
+ROOT_DIR = BASE_DIR.parents[1]
+
+def resource_path(rel: str) -> str:
+    base = getattr(sys, "_MEIPASS", str(ROOT_DIR))
+    return os.path.join(base, rel)
+
+DEFAULT_ICON_PATH = resource_path(os.path.join("icons", "logo.ico"))
+
 thread_screen_map: dict[str, str] = {}
 
 @dataclass
@@ -226,9 +239,15 @@ def format_sql(sql: str) -> str:
 class LogViewerApp:
     """Main application class encapsulating the Tkinter GUI and log parsing logic."""
 
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(self, root: tk.Misc, icon_path: Optional[str] = None) -> None:
         self.root = root
+        self.icon_path = icon_path or (DEFAULT_ICON_PATH if os.path.isfile(DEFAULT_ICON_PATH) else None)
         self.root.title("MU Log Reader VIP Premium Supper Limited")
+        if self.icon_path:
+            try:
+                self.root.iconbitmap(self.icon_path)
+            except Exception:
+                pass
         self.sql_entries: List[SqlEntry] = []
         self.error_entries: List[ErrorEntry] = []
 
@@ -270,6 +289,8 @@ class LogViewerApp:
                 "param_show": "Hiện",
                 "param_hide": "Ẩn",
                 "toggle_param_sql": "Chuyển Param/SQL",
+                "filters_section": "Bộ lọc",
+                "results_section": "Kết quả",
             },
             "JA": {
                 "choose_log": "ログ選択",
@@ -306,6 +327,8 @@ class LogViewerApp:
                 "param_show": "表示",
                 "param_hide": "非表示",
                 "toggle_param_sql": "パラメータ/SQL切替",
+                "filters_section": "フィルタ",
+                "results_section": "結果",
             }
         }
 
@@ -314,9 +337,26 @@ class LogViewerApp:
             return self.translations.get(lang, {}).get(key, self.translations["VI"].get(key, key))
         self._ = _
 
+        try:
+            default_font = ("Segoe UI", 10)
+            self.root.option_add("*Font", default_font)
+        except Exception:
+            pass
+        style = ttk.Style()
+        try:
+            style.theme_use(style.theme_use())
+        except Exception:
+            pass
+        style.configure("Treeview", borderwidth=0, relief="flat", rowheight=25)
+        style.configure("Treeview.Heading", borderwidth=0, relief="flat")
+
+        container = ttk.Frame(root, padding=8)
+        container.pack(fill="both", expand=True)
+        container.columnconfigure(0, weight=1)
+
         # ----- UI Setup -----
-        search_frame = tk.Frame(root, bd=1, relief="groove")
-        search_frame.pack(fill="x", padx=5, pady=5)
+        search_frame = ttk.LabelFrame(container, text=self._("filters_section"), padding=8, borderwidth=2, relief="ridge")
+        search_frame.pack(fill="x", pady=(0, 8))
 
         row1 = tk.Frame(search_frame)
         row1.pack(fill="x", padx=5, pady=(5, 2))
@@ -396,8 +436,8 @@ class LogViewerApp:
         # ----- Treeview Setup -----
         columns_sql = ("screen", "timestamp", "command", "function", "params", "sql")
         self.columns_sql = columns_sql
-        tree_frame = tk.Frame(root)
-        tree_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        tree_frame = ttk.LabelFrame(container, text=self._("results_section"), padding=6, borderwidth=2, relief="ridge")
+        tree_frame.pack(fill="both", expand=True, pady=(0, 8))
         scroll_y = tk.Scrollbar(tree_frame, orient="vertical")
         scroll_y.pack(side="right", fill="y")
         scroll_x = tk.Scrollbar(tree_frame, orient="horizontal")
@@ -699,7 +739,7 @@ class LogViewerApp:
                 popup.title(_("params"))
                 popup.geometry("500x300")
                 try:
-                    popup.iconbitmap("logo.ico")
+                    self._apply_icon(popup)
                 except Exception:
                     pass
                 table_frame = tk.Frame(popup)
@@ -754,7 +794,7 @@ class LogViewerApp:
                 popup.title(_("sql_detail_title"))
                 popup.geometry("800x450")
                 try:
-                    popup.iconbitmap("logo.ico")
+                    self._apply_icon(popup)
                 except Exception:
                     pass
 
@@ -839,10 +879,7 @@ class LogViewerApp:
             popup = tk.Toplevel(self.root)
             popup.title(_("error_detail_title"))
             popup.geometry("800x400")
-            try:
-                popup.iconbitmap("logo.ico")
-            except Exception:
-                pass
+            self._apply_icon(popup)
             text_frame = tk.Frame(popup)
             text_frame.pack(fill="both", expand=True, padx=5, pady=5)
             scroll_y = tk.Scrollbar(text_frame, orient="vertical")
@@ -903,6 +940,14 @@ class LogViewerApp:
                 results.append((None, val))
         return results
 
+    def _apply_icon(self, window: tk.Misc) -> None:
+        if not self.icon_path:
+            return
+        try:
+            window.iconbitmap(self.icon_path)
+        except Exception:
+            pass
+
     def perform_search(self) -> None:
         """Trigger a table refresh based on the current search term."""
         self.refresh_table()
@@ -926,28 +971,32 @@ class LogViewerApp:
         except Exception:
             pass  # Clipboard may fail in some environments
 
-def main() -> None:
+def open_log_viewer(parent: Optional[tk.Misc] = None, icon_path: Optional[str] = None):
+    resolved_icon = icon_path
+    if resolved_icon and not os.path.isfile(resolved_icon):
+        resolved_icon = None
+    if not resolved_icon and os.path.isfile(DEFAULT_ICON_PATH):
+        resolved_icon = DEFAULT_ICON_PATH
+    if parent is not None:
+        window = tk.Toplevel(parent)
+        window.title("MU Log Reader VIP Premium Supper Limited")
+        window.geometry("1200x800")
+        window.minsize(960, 640)
+        window.transient(parent)
+        LogViewerApp(window, resolved_icon)
+        window.focus_set()
+        return window
     root = tk.Tk()
     root.geometry("1200x800")
-    try:
-        root.iconbitmap("logo.ico")
-    except Exception:
-        pass
-    try:
-        default_font = ("Segoe UI", 10)
-        root.option_add("*Font", default_font)
-    except Exception:
-        pass
-    style = ttk.Style()
-    try:
-        style.theme_use(style.theme_use())
-    except Exception:
-        pass
-    # Remove internal grid lines for a clean look; header is not bold
-    style.configure("Treeview", borderwidth=0, relief="flat", rowheight=25)
-    style.configure("Treeview.Heading", borderwidth=0, relief="flat")
-    app = LogViewerApp(root)
+    root.minsize(960, 640)
+    LogViewerApp(root, resolved_icon)
     root.mainloop()
+    return root
+
+
+def main() -> None:
+    open_log_viewer()
+
 
 if __name__ == "__main__":
     main()

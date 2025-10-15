@@ -11,7 +11,7 @@ from tkinter.scrolledtext import ScrolledText
 from typing import Dict, List, Optional
 
 from screen.DB import db_utils
-from screen.DB.widgets import ColumnOrderDialog, DataGrid
+from screen.DB.widgets import ColumnOrderDialog, DataGrid, LoadingPopup
 
 
 class UpdateWindow(tk.Toplevel):
@@ -26,11 +26,14 @@ class UpdateWindow(tk.Toplevel):
         self.minsize(960, 620)
         self.resizable(True, True)
 
-        self._tables_all: List[str] = []
+        self._table_items: List[Dict[str, str]] = []
+        self._table_view: List[Dict[str, str]] = []
+        self._active_table: Optional[Dict[str, str]] = None
         self._columns: List[str] = []
         self._column_meta: Dict[str, dict] = {}
         self._pk_columns: List[str] = []
         self._cached_rows: List[Dict[str, str]] = []
+        self._loader: Optional[LoadingPopup] = None
 
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -144,45 +147,78 @@ class UpdateWindow(tk.Toplevel):
                 return
             self.after(0, lambda: self._init_tables(tables))
 
+        self._show_loading("Đang tải danh sách bảng...")
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_error(self, msg: str):
+        self._hide_loading()
         messagebox.showerror("Tool VIP", msg, parent=self)
         self.destroy()
 
     def _init_tables(self, tables: List[str]):
-        self._tables_all = tables
+        self._hide_loading()
+        items: List[Dict[str, str]] = []
+        for raw in tables:
+            owner, name = db_utils.split_owner_table(raw, self.current_owner)
+            full = f"{owner}.{name}"
+            items.append({"full": full, "display": name, "owner": owner, "table": name})
+        items.sort(key=lambda it: (it["display"], it["owner"]))
+        self._table_items = items
+        self._table_view = list(items)
         self.list_tables.delete(0, tk.END)
-        for tbl in tables:
-            self.list_tables.insert(tk.END, tbl)
-        if tables:
+        for item in self._table_view:
+            self.list_tables.insert(tk.END, item["display"])
+        if self._table_view:
             self.list_tables.selection_set(0)
             self._on_select_table()
+        else:
+            self._active_table = None
 
     # ------------------------------------------------------------------
     def _filter_tables(self):
         keyword = self.var_search.get().strip().upper()
+        current_full = self._active_table["full"] if self._active_table else None
+        if keyword:
+            view = [item for item in self._table_items if keyword in item["display"].upper()]
+        else:
+            view = list(self._table_items)
+        self._table_view = view
         self.list_tables.delete(0, tk.END)
-        for tbl in self._tables_all:
-            if not keyword or keyword in tbl.upper():
-                self.list_tables.insert(tk.END, tbl)
+        selected_index = None
+        for idx, item in enumerate(view):
+            self.list_tables.insert(tk.END, item["display"])
+            if item["full"] == current_full:
+                selected_index = idx
+        if selected_index is not None:
+            self.list_tables.selection_set(selected_index)
+        elif view:
+            self.list_tables.selection_set(0)
+            self._on_select_table()
+        else:
+            self._active_table = None
+            self.grid.clear()
+            self.txt_sql.delete("1.0", tk.END)
+            self.txt_condition.delete("1.0", tk.END)
 
-    def _on_select_table(self):
+    def _on_select_table(self, _event=None):
         selection = self.list_tables.curselection()
         if not selection:
             return
         index = selection[0]
-        table = self.list_tables.get(index)
-        if not table:
+        if index >= len(self._table_view):
             return
-        self._load_table_metadata(table)
+        item = self._table_view[index]
+        if self._active_table and self._active_table["full"] == item["full"]:
+            return
+        self._active_table = item
+        self._load_table_metadata(item)
 
-    def _load_table_metadata(self, table: str):
+    def _load_table_metadata(self, item: Dict[str, str]):
         if not self.conn:
             return
         try:
-            columns = db_utils.fetch_table_columns(self.conn, table, self.current_owner)
-            pk_cols = db_utils.fetch_primary_keys(self.conn, table, self.current_owner)
+            columns = db_utils.fetch_table_columns(self.conn, item["full"], self.current_owner)
+            pk_cols = db_utils.fetch_primary_keys(self.conn, item["full"], self.current_owner)
         except Exception as exc:
             messagebox.showerror("Tool VIP", f"Lỗi đọc metadata: {exc}", parent=self)
             return
@@ -193,11 +229,11 @@ class UpdateWindow(tk.Toplevel):
         self.grid.clear()
         self.grid.append_dict({})
         self._cached_rows.clear()
-        self._set_sql_label(table)
+        self._set_sql_label(item["display"])
 
-    def _set_sql_label(self, table: str):
+    def _set_sql_label(self, table_display: str):
         frame: ttk.LabelFrame = self.txt_sql.master  # type: ignore[assignment]
-        frame.configure(text=f"Update {table}")
+        frame.configure(text=f"Update {table_display}")
 
     # ------------------------------------------------------------------
     def _generate_sql(self):
@@ -214,10 +250,10 @@ class UpdateWindow(tk.Toplevel):
             return
         set_columns = [col for col in self._columns if col not in self._pk_columns]
         if not set_columns:
-            messagebox.showwarning("Tool VIP", "Bảng không có cột nào để update (chỉ gồm khóa chính).", parent=self)
+            messagebox.showwarning("Tool VIP", "Không có cột nào để update.", parent=self)
             return
         condition_template = self._condition_template()
-
+        owner, table_name = self._split_table(table)
         sql_lines: List[str] = []
         for row in rows:
             set_parts = []
@@ -229,20 +265,18 @@ class UpdateWindow(tk.Toplevel):
             for pk in self._pk_columns:
                 meta = self._column_meta.get(pk, {})
                 literal = db_utils.format_sql_literal(row.get(pk), meta)
-                if literal == "NULL":
-                    messagebox.showwarning("Tool VIP", f"Khóa chính {pk} bị trống.", parent=self)
-                    return
                 where_parts.append(f"{pk} = {literal}")
             extra = self._render_condition(condition_template, row)
-            if extra:
-                where_parts.append(extra)
-            if not where_parts:
-                messagebox.showwarning("Tool VIP", "Thiếu điều kiện WHERE.", parent=self)
-                return
-            sql_lines.append(f"UPDATE {table} SET {', '.join(set_parts)} WHERE {' AND '.join(where_parts)};")
+            sql = f"UPDATE {owner}.{table_name} SET " + ", ".join(set_parts)
+            if where_parts:
+                sql += " WHERE " + " AND ".join(where_parts)
+                if extra:
+                    sql += " AND (" + extra + ")"
+            elif extra:
+                sql += " WHERE " + extra
+            sql_lines.append(sql + ";")
         self.txt_sql.delete("1.0", tk.END)
         self.txt_sql.insert(tk.END, "\n".join(sql_lines))
-        self._cached_rows = rows
 
     def _copy_sql(self):
         data = self.txt_sql.get("1.0", tk.END).strip()
@@ -265,7 +299,6 @@ class UpdateWindow(tk.Toplevel):
             self.grid.clear()
             for row in current_rows:
                 self.grid.append_dict(row)
-            self._cached_rows = current_rows
 
     def _clear(self):
         if not messagebox.askyesno("Tool VIP", "Bạn có muốn reset dữ liệu không?", parent=self):
@@ -371,24 +404,32 @@ class UpdateWindow(tk.Toplevel):
 
     # ------------------------------------------------------------------
     def _split_table(self, raw: str) -> tuple[str, str]:
-        if "." in raw:
-            owner, name = raw.split(".", 1)
-            return owner.strip().upper(), name.strip().upper()
-        return self.current_owner.upper(), raw.strip().upper()
+        return db_utils.split_owner_table(raw, self.current_owner)
 
     def _current_table(self) -> Optional[str]:
-        selection = self.list_tables.curselection()
-        if not selection:
+        if not self._active_table:
             return None
-        return self.list_tables.get(selection[0])
+        return self._active_table["full"]
 
     def _on_close(self):
+        self._hide_loading()
         try:
             if self.conn:
                 self.conn.close()
         except Exception:
             pass
         self.destroy()
+
+    def _show_loading(self, message: str):
+        if self._loader:
+            return
+        self._loader = LoadingPopup(self, message)
+
+    def _hide_loading(self):
+        if not self._loader:
+            return
+        self._loader.close()
+        self._loader = None
 
 
 def open_update_window(parent: tk.Widget, connection: Dict[str, str]):

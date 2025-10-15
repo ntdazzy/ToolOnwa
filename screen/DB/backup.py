@@ -1,4 +1,4 @@
-"""
+﻿"""
 Backup and restore screens.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ from tkinter.scrolledtext import ScrolledText
 from typing import Dict, List, Optional
 
 from screen.DB import db_utils
-from screen.DB.widgets import DataGrid
+from screen.DB.widgets import DataGrid, LoadingPopup
 
 
 class BackupRestoreBase(tk.Toplevel):
@@ -34,10 +34,12 @@ class BackupRestoreBase(tk.Toplevel):
         self.minsize(480, 560)
         self.resizable(True, True)
 
-        self._tables_all: List[str] = []
+        self._table_items: List[Dict[str, str]] = []
+        self._table_view: List[Dict[str, str]] = []
+        self._active_table: Optional[Dict[str, str]] = None
         self._columns: List[str] = []
         self._column_meta: Dict[str, dict] = {}
-        self._current_table: Optional[str] = None
+        self._loader: Optional[LoadingPopup] = None
 
         self.var_search = tk.StringVar()
         self.var_selected_table = tk.StringVar()
@@ -100,60 +102,99 @@ class BackupRestoreBase(tk.Toplevel):
                 return
             self.after(0, lambda: self._init_tables(tables))
 
+        self._show_loading("Đang tải danh sách bảng...")
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_error(self, msg: str):
+        self._hide_loading()
         messagebox.showerror("Tool VIP", msg, parent=self)
         self.destroy()
 
     def _init_tables(self, tables: List[str]):
-        self._tables_all = sorted(tables)
+        self._hide_loading()
+        items: List[Dict[str, str]] = []
+        for raw in tables:
+            owner, name = db_utils.split_owner_table(raw, self.current_owner)
+            full = f"{owner}.{name}"
+            items.append({"full": full, "display": name, "owner": owner, "table": name})
+        items.sort(key=lambda it: (it["display"], it["owner"]))
+        self._table_items = items
+        self._table_view = list(items)
         self.list_tables.delete(0, tk.END)
-        for tbl in self._tables_all:
-            self.list_tables.insert(tk.END, tbl)
-        if self._tables_all:
+        for item in self._table_view:
+            self.list_tables.insert(tk.END, item["display"])
+        if self._table_view:
             self.list_tables.selection_set(0)
             self._handle_table_select()
+        else:
+            self._active_table = None
+            self.var_selected_table.set("")
+            self._columns.clear()
+            self._column_meta.clear()
 
     def _filter_tables(self):
         keyword = self.var_search.get().strip().upper()
+        current_full = self._active_table["full"] if self._active_table else None
+        if keyword:
+            view = [item for item in self._table_items if keyword in item["display"].upper()]
+        else:
+            view = list(self._table_items)
+        self._table_view = view
         self.list_tables.delete(0, tk.END)
-        for tbl in self._tables_all:
-            if not keyword or keyword in tbl.upper():
-                self.list_tables.insert(tk.END, tbl)
+        selected_index = None
+        for idx, item in enumerate(view):
+            self.list_tables.insert(tk.END, item["display"])
+            if item["full"] == current_full:
+                selected_index = idx
+        if selected_index is not None:
+            self.list_tables.selection_set(selected_index)
+        elif view:
+            self.list_tables.selection_set(0)
+            self._handle_table_select()
+        else:
+            self._active_table = None
+            self.var_selected_table.set("")
+            self.list_tables.selection_clear(0, tk.END)
+            self._columns.clear()
+            self._column_meta.clear()
+            self.on_table_ready("")
 
     def _handle_table_select(self, _event=None):
         selection = self.list_tables.curselection()
         if not selection:
             return
-        table = self.list_tables.get(selection[0])
-        if table == self._current_table:
+        index = selection[0]
+        if index >= len(self._table_view):
             return
-        self._current_table = table
-        self.var_selected_table.set(table)
-        self._load_table_metadata(table)
+        item = self._table_view[index]
+        if self._active_table and self._active_table["full"] == item["full"]:
+            return
+        self._active_table = item
+        self.var_selected_table.set(item["display"])
+        self._load_table_metadata(item)
 
-    def _load_table_metadata(self, table: str):
+    def _load_table_metadata(self, item: Dict[str, str]):
         if not self.conn:
             return
         try:
-            columns = db_utils.fetch_table_columns(self.conn, table, self.current_owner)
+            columns = db_utils.fetch_table_columns(self.conn, item["full"], self.current_owner)
         except Exception as exc:
             messagebox.showerror("Tool VIP", f"Lỗi đọc metadata: {exc}", parent=self)
             return
         self._columns = [c["column_name"] for c in columns]
         self._column_meta = {c["column_name"]: c for c in columns}
-        self.on_table_ready(table)
+        self.on_table_ready(item["full"])
 
     def on_table_ready(self, table: str):
         raise NotImplementedError
 
     # ------------------------------------------------------------------
     def _split_table(self, raw: str) -> tuple[str, str]:
-        if "." in raw:
-            owner, name = raw.split(".", 1)
-            return owner.strip().upper(), name.strip().upper()
-        return self.current_owner.upper(), raw.strip().upper()
+        if raw and "." in raw:
+            return db_utils.split_owner_table(raw, self.current_owner)
+        if self._active_table:
+            return self._active_table["owner"], self._active_table["table"]
+        return db_utils.split_owner_table(raw, self.current_owner)
 
     def _append_log(self, text: str):
         widget = getattr(self, "txt_log", None)
@@ -163,12 +204,24 @@ class BackupRestoreBase(tk.Toplevel):
         widget.see(tk.END)
 
     def _on_close(self):
+        self._hide_loading()
         try:
             if self.conn:
                 self.conn.close()
         except Exception:
             pass
         self.destroy()
+
+    def _show_loading(self, message: str):
+        if self._loader:
+            return
+        self._loader = LoadingPopup(self, message)
+
+    def _hide_loading(self):
+        if not self._loader:
+            return
+        self._loader.close()
+        self._loader = None
 
     # ------------------------------------------------------------------
     def _run_statements(self, sql_text: str) -> bool:
@@ -249,7 +302,7 @@ class BackupWindow(BackupRestoreBase):
         btns.grid(row=5, column=0, sticky="ew", pady=6)
         btns.columnconfigure(0, weight=1)
         btns.columnconfigure(1, weight=1)
-        ttk.Button(btns, text="Cập nhật SQL", command=self._fill_default_sql).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(btns, text="Cập nhật SQL", command=self._fill_default_sql_backup).grid(row=0, column=0, sticky="ew", padx=(0, 4))
         ttk.Button(btns, text="Thực thi", command=self._execute).grid(row=0, column=1, sticky="ew")
 
         log_frame = ttk.LabelFrame(parent, text="Log", padding=6)
@@ -264,6 +317,10 @@ class BackupWindow(BackupRestoreBase):
         parent.rowconfigure(6, weight=1)
 
     def on_table_ready(self, table: str):
+        if not table:
+            self.var_backup_name.set("")
+            self.txt_sql.delete("1.0", tk.END)
+            return
         owner, name = self._split_table(table)
         default_name = f"{owner}.{name}_BK_{dt.datetime.now().strftime('%Y%m%d')}"
         self.var_backup_name.set(default_name)
@@ -323,7 +380,7 @@ class RestoreFromBackupWindow(BackupRestoreBase):
         btns.grid(row=5, column=0, sticky="ew", pady=6)
         btns.columnconfigure(0, weight=1)
         btns.columnconfigure(1, weight=1)
-        ttk.Button(btns, text="Cập nhật SQL", command=self._fill_default_sql).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(btns, text="Cập nhật SQL", command=self._fill_default_sql_backup).grid(row=0, column=0, sticky="ew", padx=(0, 4))
         ttk.Button(btns, text="Thực thi", command=self._execute).grid(row=0, column=1, sticky="ew")
 
         log_frame = ttk.LabelFrame(parent, text="Log", padding=6)
@@ -337,11 +394,15 @@ class RestoreFromBackupWindow(BackupRestoreBase):
         parent.rowconfigure(4, weight=1)
         parent.rowconfigure(6, weight=1)
 
-    def on_table_ready(self, table: str):
-        owner, name = self._split_table(table)
-        pattern = f"{owner}.{name}_BK_{dt.datetime.now().strftime('%Y%m%d')}"
-        self.var_backup_name.set(pattern)
-        self._fill_default_sql()
+def on_table_ready(self, table: str):
+    if not table:
+        self.txt_sql.delete("1.0", tk.END)
+        self.var_backup_name.set("")
+        return
+    owner, name = self._split_table(table)
+    pattern = f"{owner}.{name}_BK_{dt.datetime.now().strftime('%Y%m%d')}"
+    self.var_backup_name.set(pattern)
+    self._fill_default_sql()
 
     def _fill_default_sql(self):
         target = self.var_selected_table.get().strip()
@@ -356,6 +417,21 @@ class RestoreFromBackupWindow(BackupRestoreBase):
             f"TRUNCATE TABLE {full_target};\n"
             f"INSERT INTO {full_target}\nSELECT *\nFROM {full_backup};"
         )
+        self.txt_sql.delete("1.0", tk.END)
+        self.txt_sql.insert(tk.END, default_sql)
+
+    def _fill_default_sql_backup(self):
+        table = self.var_selected_table.get().strip()
+        backup = self.var_backup_name.get().strip()
+        if not table or not backup:
+            return
+        owner_src, src = self._split_table(table)
+        owner_bk, bk = self._split_table(backup)
+        full_src = f"{owner_src}.{src}"
+        full_bk = f"{owner_bk}.{bk}"
+        default_sql = (f"DROP TABLE {full_bk};\n"
+                       f"CREATE TABLE {full_bk} AS\n"
+                       f"SELECT *\nFROM {full_src};")
         self.txt_sql.delete("1.0", tk.END)
         self.txt_sql.insert(tk.END, default_sql)
 
