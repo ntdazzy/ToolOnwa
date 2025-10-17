@@ -14,6 +14,7 @@ from screen.DB import insert as insert_screen
 from screen.DB import update as update_screen
 from screen.DB import backup as backup_screen
 from screen.MU import log_viewer as log_viewer
+from screen.General import rdsinfo
 from core import i18n
 
 APP_TITLE = "ToolONWA VIP v1.0"
@@ -260,7 +261,7 @@ class ToolVIP(tk.Tk):
         self.frm_common.grid(row=2, column=0, sticky="ew", padx=2, pady=(0, 8))
         for i in range(3):
             self.frm_common.columnconfigure(i, weight=1)
-        self.btn_rds = ttk.Button(self.frm_common, command=self._coming_soon)
+        self.btn_rds = ttk.Button(self.frm_common, command=self._open_rds_info)
         self.btn_rds.grid(row=0, column=0, padx=8, pady=4, sticky="ew")
         self.btn_docs = ttk.Button(self.frm_common, command=self._coming_soon)
         self.btn_docs.grid(row=0, column=1, padx=8, pady=4, sticky="ew")
@@ -381,7 +382,7 @@ class ToolVIP(tk.Tk):
             with open(path,"r",encoding="utf-8",errors="ignore") as f: text=f.read()
             self.conn_blocks=parse_tnsnames_blocks(text)
         except Exception as e:
-            messagebox.showerror(APP_TITLE, f"Could not load tnsnames.ora:\n{e}")
+            messagebox.showerror(APP_TITLE, self._t("main.msg.load_tns_error", error=str(e)))
 
     def _load_combobox_from_json(self):
         ensure_configs_dir()
@@ -556,7 +557,7 @@ class ToolVIP(tk.Tk):
         try:
             cmd_sql_plus.open_sqlplus(user, pwd, host, port, alias, self.var_use_host_port.get())
         except Exception as e:
-            messagebox.showerror(APP_TITLE, f"Lá»—i má»Ÿ SQL*Plus: {e}")
+            messagebox.showerror(APP_TITLE, self._t("main.msg.sqlplus_error", error=str(e)))
 
     def _collect_connection_info(self) -> dict | None:
         user = self.ent_user.get().strip()
@@ -575,6 +576,13 @@ class ToolVIP(tk.Tk):
             "port": port,
             "use_host_port": bool(self.var_use_host_port.get()),
         }
+
+    def _open_rds_info(self):
+        """Mở màn hình quản lý thông tin RDS."""
+        try:
+            rdsinfo.open_rds_window(self)
+        except Exception as e:
+            messagebox.showerror(APP_TITLE, self._t("rds.msg.open_error", error=str(e)), parent=self)
 
     def _open_insert_screen(self):
         info = self._collect_connection_info()
@@ -612,10 +620,14 @@ class ToolVIP(tk.Tk):
         try:
             log_viewer.open_log_viewer(self, ICON_PATH)
         except Exception as e:
-            messagebox.showerror(APP_TITLE, f"Lá»—i má»Ÿ log viewer: {e}")
+            messagebox.showerror(APP_TITLE, self._t("main.msg.log_viewer_error", error=str(e)))
 
 def main(): app=ToolVIP(); app.mainloop()
 if __name__=="__main__": main()
+
+
+
+
 
 
 

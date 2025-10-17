@@ -16,6 +16,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "common.cancel": {LANG_VI: "Hủy", LANG_JP: "キャンセル"},
     "common.close": {LANG_VI: "Đóng", LANG_JP: "閉じる"},
     "common.copy": {LANG_VI: "Sao chép", LANG_JP: "コピー"},
+    "common.app_title": {LANG_VI: "Tool VIP", LANG_JP: "Tool VIP"},
     "common.yes": {LANG_VI: "Có", LANG_JP: "はい"},
     "common.no": {LANG_VI: "Không", LANG_JP: "いいえ"},
     "common.warning": {LANG_VI: "Cảnh báo", LANG_JP: "警告"},
@@ -23,6 +24,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "common.info": {LANG_VI: "Thông báo", LANG_JP: "通知"},
     "common.unknown_error": {LANG_VI: "Không rõ lỗi.", LANG_JP: "不明なエラーです。"},
     "common.loading_tables": {LANG_VI: "Đang tải danh sách bảng...", LANG_JP: "テーブル一覧を読み込み中..."},
+    "common.msg.connection_error": {
+        LANG_VI: "Lỗi kết nối: {error}",
+        LANG_JP: "接続エラー: {error}",
+    },
 
     # --- Màn hình chính ---
     "main.section.db": {LANG_VI: "DB", LANG_JP: "DB"},
@@ -90,6 +95,18 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "main.msg.coming_soon": {
         LANG_VI: "Tính năng đang được phát triển.",
         LANG_JP: "開発中の機能です。",
+    },
+    "main.msg.load_tns_error": {
+        LANG_VI: "Không tải được tnsnames.ora: {error}",
+        LANG_JP: "tnsnames.ora を読み込めません: {error}",
+    },
+    "main.msg.sqlplus_error": {
+        LANG_VI: "Không chạy được SQL*Plus: {error}",
+        LANG_JP: "SQL*Plus を起動できません: {error}",
+    },
+    "main.msg.log_viewer_error": {
+        LANG_VI: "Không mở được log viewer: {error}",
+        LANG_JP: "ログビューアを開けません: {error}",
     },
     "main.popup.details_title": {
         LANG_VI: "Chi tiết",
@@ -188,7 +205,17 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "update.section.search": {LANG_VI: "Tìm kiếm", LANG_JP: "検索"},
     "update.section.actions": {LANG_VI: "Chức năng", LANG_JP: "機能"},
     "update.section.connection": {LANG_VI: "Thông tin kết nối", LANG_JP: "接続情報"},
-    "update.section.sql": {LANG_VI: "Update ...", LANG_JP: "Update ..."},
+    "update.label.table_name": {LANG_VI: "Tên bảng", LANG_JP: "テーブル名"},
+    "update.label.host": {LANG_VI: "Host", LANG_JP: "ホスト"},
+    "update.label.port": {LANG_VI: "Port", LANG_JP: "ポート"},
+    "update.btn.import_csv": {LANG_VI: "Import CSV", LANG_JP: "CSV取り込み"},
+    "update.btn.export_csv": {LANG_VI: "Export CSV", LANG_JP: "CSV書き出し"},
+    "update.btn.add_row": {LANG_VI: "Thêm dòng trống", LANG_JP: "空行追加"},
+    "update.btn.build_sql": {LANG_VI: "Tạo câu Update", LANG_JP: "Update文作成"},
+    "update.btn.reorder": {LANG_VI: "Thay đổi vị trí cột", LANG_JP: "列順序変更"},
+    "update.btn.execute": {LANG_VI: "Thực thi", LANG_JP: "実行"},
+    "update.btn.clear": {LANG_VI: "Xóa dữ liệu", LANG_JP: "クリア"},
+    "update.section.sql": {LANG_VI: "Update {table}", LANG_JP: "Update {table}"},
     "update.section.condition": {
         LANG_VI: "Điều kiện UPDATE bổ sung (dạng {{COLUMN}} để lấy giá trị dòng)",
         LANG_JP: "追加UPDATE条件（{{COLUMN}} で行の値を使用）",
@@ -221,6 +248,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         LANG_VI: "Thiếu điều kiện WHERE.",
         LANG_JP: "WHERE条件が不足しています。",
     },
+    "update.msg.where_missing_no_pk": {
+        LANG_VI: "Thiếu điều kiện WHERE. Bảng không có khóa chính nên cần nhập điều kiện.",
+        LANG_JP: "WHERE条件が不足しています。主キーがないため条件を入力してください。",
+    },
     "update.msg.pk_missing": {
         LANG_VI: "Khóa chính {column} bị trống.",
         LANG_JP: "主キー {column} が空です。",
@@ -252,13 +283,35 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
 
     # --- Màn hình Backup ---
     "backup.title": {LANG_VI: "Backup Table", LANG_JP: "バックアップ"},
+    "backup.restore_backup.title": {
+        LANG_VI: "Restore từ bảng backup",
+        LANG_JP: "バックアップテーブルから復元",
+    },
+    "backup.restore_csv.title": {
+        LANG_VI: "Restore từ CSV",
+        LANG_JP: "CSVから復元",
+    },
     "backup.section.search": {LANG_VI: "Tìm kiếm", LANG_JP: "検索"},
     "backup.section.sql": {LANG_VI: "SQL", LANG_JP: "SQL"},
     "backup.section.log": {LANG_VI: "Log", LANG_JP: "ログ"},
+    "backup.section.preview": {LANG_VI: "Xem thử dữ liệu", LANG_JP: "データプレビュー"},
     "backup.label.table": {LANG_VI: "Tên bảng", LANG_JP: "テーブル名"},
+    "backup.label.source_table": {LANG_VI: "Bảng nguồn", LANG_JP: "元テーブル"},
+    "backup.label.target_table": {LANG_VI: "Bảng đích", LANG_JP: "対象テーブル"},
     "backup.label.backup_table": {LANG_VI: "Bảng backup", LANG_JP: "バックアップテーブル"},
+    "backup.label.backup_source_table": {
+        LANG_VI: "Bảng backup nguồn",
+        LANG_JP: "バックアップ元テーブル",
+    },
+    "backup.label.no_file": {LANG_VI: "Chưa chọn file", LANG_JP: "ファイル未選択"},
     "backup.btn.refresh_sql": {LANG_VI: "Cập nhật SQL", LANG_JP: "SQL更新"},
     "backup.btn.execute": {LANG_VI: "Thực thi", LANG_JP: "実行"},
+    "backup.btn.import_csv": {LANG_VI: "Import CSV", LANG_JP: "CSV取り込み"},
+    "backup.btn.clear_preview": {LANG_VI: "Xóa dữ liệu", LANG_JP: "データをクリア"},
+    "backup.btn.execute_restore": {LANG_VI: "Thực thi", LANG_JP: "実行"},
+    "backup.dialog.select_csv": {LANG_VI: "Chọn file CSV", LANG_JP: "CSVファイルを選択"},
+    "backup.dialog.csv_files": {LANG_VI: "File CSV", LANG_JP: "CSVファイル"},
+    "backup.dialog.all_files": {LANG_VI: "Tất cả các file", LANG_JP: "すべてのファイル"},
     "backup.msg.not_connected": {
         LANG_VI: "Chưa kết nối database.",
         LANG_JP: "データベースに接続していません。",
@@ -266,6 +319,18 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "backup.msg.no_statement": {
         LANG_VI: "Không có câu lệnh để thực thi.",
         LANG_JP: "実行するSQLがありません。",
+    },
+    "backup.msg.no_csv_data": {
+        LANG_VI: "Chưa có dữ liệu để restore.",
+        LANG_JP: "復元するCSVデータがありません。",
+    },
+    "backup.msg.no_target_table": {
+        LANG_VI: "Chưa chọn bảng đích.",
+        LANG_JP: "対象テーブルが選択されていません。",
+    },
+    "backup.msg.cursor_error": {
+        LANG_VI: "Lỗi tạo cursor: {error}",
+        LANG_JP: "カーソル作成エラー: {error}",
     },
     "backup.msg.execute_error": {
         LANG_VI: "Lỗi thực thi: {error}",
@@ -287,6 +352,18 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         LANG_VI: "Lỗi đọc CSV: {error}",
         LANG_JP: "CSV読み込みエラー: {error}",
     },
+    "backup.msg.missing_header": {
+        LANG_VI: "Không tìm thấy header trong file.",
+        LANG_JP: "ファイルにヘッダーが見つかりません。",
+    },
+    "backup.msg.missing_columns": {
+        LANG_VI: "Thiếu cột: {columns}",
+        LANG_JP: "不足列: {columns}",
+    },
+    "backup.msg.extra_columns": {
+        LANG_VI: "Dư cột: {columns}",
+        LANG_JP: "余分な列: {columns}",
+    },
     "backup.msg.restore_confirm": {
         LANG_VI: "Restore {count} dòng vào {table}?",
         LANG_JP: "{table} に {count} 行を復元しますか？",
@@ -298,6 +375,19 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "backup.msg.restore_success": {
         LANG_VI: "Restore CSV thành công.",
         LANG_JP: "CSV復元に成功しました。",
+    },
+    "backup.log.complete": {LANG_VI: "Hoàn thành.", LANG_JP: "完了しました。"},
+    "backup.log.skip_drop": {
+        LANG_VI: "(Bảng không tồn tại, bỏ qua DROP)",
+        LANG_JP: "（テーブルが存在しないため DROP をスキップ）",
+    },
+    "backup.log.import_summary": {
+        LANG_VI: "Đã import {count} dòng từ {path}",
+        LANG_JP: "CSV {path} から {count} 行を取り込みました。",
+    },
+    "backup.log.restore_done": {
+        LANG_VI: "Restore CSV hoàn thành.",
+        LANG_JP: "CSV復元が完了しました。",
     },
 
     # --- RDS info ---
@@ -317,6 +407,16 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "rds.btn.copy_host": {LANG_VI: "Copy host", LANG_JP: "ホストをコピー"},
     "rds.btn.copy_user": {LANG_VI: "Copy user", LANG_JP: "ユーザーをコピー"},
     "rds.btn.copy_pass": {LANG_VI: "Copy password", LANG_JP: "パスワードをコピー"},
+    "rds.btn.open_detail": {LANG_VI: "Chi tiết", LANG_JP: "詳細"},
+    "rds.detail.title": {LANG_VI: "Chi tiết RDS", LANG_JP: "RDS詳細"},
+    "rds.msg.copy_success": {
+        LANG_VI: "Đã copy {field} vào clipboard.",
+        LANG_JP: "{field} をクリップボードにコピーしました。",
+    },
+    "rds.msg.no_host": {
+        LANG_VI: "Chưa chọn host.",
+        LANG_JP: "ホストが選択されていません。",
+    },
     "rds.msg.select_item": {
         LANG_VI: "Vui lòng chọn subsystem và host.",
         LANG_JP: "サブシステムとホストを選択してください。",
@@ -333,11 +433,58 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         LANG_VI: "Đã lưu cấu hình RDS.",
         LANG_JP: "RDS情報を保存しました。",
     },
+    "rds.msg.save_error": {
+        LANG_VI: "Không lưu được cấu hình RDS: {error}",
+        LANG_JP: "RDS情報を保存できません: {error}",
+    },
+    "rds.msg.open_error": {
+        LANG_VI: "Không mở được màn hình RDS: {error}",
+        LANG_JP: "RDS画面を開けません: {error}",
+    },
 
     # --- Log viewer ---
+    "log.title": {LANG_VI: "Trình xem log MU", LANG_JP: "MUログビューア"},
+    "log.section.filters": {LANG_VI: "Bộ lọc", LANG_JP: "フィルタ"},
+    "log.section.results": {LANG_VI: "Kết quả", LANG_JP: "結果"},
+    "log.label.choose": {LANG_VI: "Chọn log", LANG_JP: "ログ選択"},
+    "log.label.type": {LANG_VI: "Loại log", LANG_JP: "ログ種別"},
+    "log.label.screen": {LANG_VI: "Màn hình", LANG_JP: "画面"},
+    "log.label.command_type": {LANG_VI: "Loại lệnh", LANG_JP: "コマンド種別"},
+    "log.label.command": {LANG_VI: "Loại lệnh", LANG_JP: "コマンド種別"},
+    "log.label.keyword": {LANG_VI: "Từ khóa", LANG_JP: "キーワード"},
+    "log.label.time_display": {LANG_VI: "Hiển thị thời gian", LANG_JP: "時間の表示"},
+    "log.label.param_display": {LANG_VI: "Tham số", LANG_JP: "パラメータ"},
+    "log.option.sql": {LANG_VI: "SQL", LANG_JP: "SQL"},
+    "log.option.error": {LANG_VI: "Lỗi", LANG_JP: "エラー"},
+    "log.option.param_show": {LANG_VI: "Hiển thị", LANG_JP: "表示"},
+    "log.option.param_hide": {LANG_VI: "Ẩn", LANG_JP: "非表示"},
+    "log.option.time_full": {LANG_VI: "yyyy-mm-dd hh:mm:ss", LANG_JP: "yyyy-mm-dd hh:mm:ss"},
+    "log.option.time_time": {LANG_VI: "hh:mm:ss", LANG_JP: "hh:mm:ss"},
+    "log.btn.choose": {LANG_VI: "Chọn...", LANG_JP: "選択..."},
+    "log.btn.search": {LANG_VI: "Tìm kiếm", LANG_JP: "検索"},
+    "log.btn.copy": {LANG_VI: "Copy", LANG_JP: "コピー"},
+    "log.btn.close": {LANG_VI: "Đóng", LANG_JP: "閉じる"},
+    "log.btn.toggle_param_sql": {LANG_VI: "Đổi Param/SQL", LANG_JP: "パラメータ/SQL切替"},
+    "log.column.screen_id": {LANG_VI: "Mã màn hình", LANG_JP: "画面ID"},
+    "log.column.time": {LANG_VI: "Thời gian", LANG_JP: "日時"},
+    "log.column.command": {LANG_VI: "Lệnh", LANG_JP: "コマンド"},
+    "log.column.function": {LANG_VI: "Hàm", LANG_JP: "関数"},
+    "log.column.params": {LANG_VI: "Tham số", LANG_JP: "パラメータ"},
+    "log.column.sql": {LANG_VI: "SQL", LANG_JP: "SQL"},
+    "log.column.summary": {LANG_VI: "Tóm tắt", LANG_JP: "概要"},
+    "log.column.details": {LANG_VI: "Chi tiết", LANG_JP: "詳細"},
+    "log.column.field": {LANG_VI: "Trường", LANG_JP: "フィールド"},
+    "log.column.value": {LANG_VI: "Giá trị", LANG_JP: "値"},
+    "log.msg.no_file": {LANG_VI: "Chưa chọn file log.", LANG_JP: "ログファイルが選択されていません。"},
+    "log.msg.read_error": {LANG_VI: "Không đọc được log: {error}", LANG_JP: "ログを読み込めません: {error}"},
+    "log.msg.parse_error": {LANG_VI: "Không phân tích được log.", LANG_JP: "ログを解析できません。"},
+    "log.msg.no_results": {LANG_VI: "Không có dữ liệu hiển thị.", LANG_JP: "表示するデータがありません。"},
     "log.msg.copied": {LANG_VI: "Đã copy", LANG_JP: "コピーしました"},
     "log.msg.sql_copied": {LANG_VI: "SQL đã được copy vào clipboard", LANG_JP: "SQLをコピーしました"},
     "log.msg.details_copied": {LANG_VI: "Chi tiết đã được copy vào clipboard", LANG_JP: "詳細をコピーしました"},
+    "log.detail.sql_title": {LANG_VI: "Chi tiết SQL", LANG_JP: "SQL詳細"},
+    "log.detail.error_title": {LANG_VI: "Chi tiết lỗi", LANG_JP: "エラー詳細"},
+    "log.detail.params_title": {LANG_VI: "Tham số", LANG_JP: "パラメータ"},
 }
 
 

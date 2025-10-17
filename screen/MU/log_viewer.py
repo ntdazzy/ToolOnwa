@@ -8,6 +8,8 @@ from pathlib import Path
 from tkinter import filedialog, ttk, messagebox
 from typing import List, Optional, Sequence, Tuple
 
+from core import i18n
+
 # Regular expressions for parsing
 SCREEN_ID_RE = re.compile(r"MU[A-Z]{2}\d{4}")
 DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2} ")
@@ -19,6 +21,8 @@ REQUEST_RE = re.compile(r"(?:GET|POST|PUT|DELETE)\s+/(MU[A-Z]{2}\d{4})")
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parents[1]
 
+APP_TITLE_KEY = "common.app_title"
+
 def resource_path(rel: str) -> str:
     base = getattr(sys, "_MEIPASS", str(ROOT_DIR))
     return os.path.join(base, rel)
@@ -27,9 +31,11 @@ DEFAULT_ICON_PATH = resource_path(os.path.join("icons", "logo.ico"))
 
 thread_screen_map: dict[str, str] = {}
 
+
 @dataclass
 class SqlEntry:
-    """Represents a single SQL statement."""
+    """Thông tin một câu SQL kèm metadata cần thiết."""
+
     timestamp: str
     screen_id: Optional[str]
     sql_type: str
@@ -38,16 +44,19 @@ class SqlEntry:
     raw_sql: str
     sql: str
 
+
 @dataclass
 class ErrorEntry:
-    """Represents a single error log entry with its stack trace."""
+    """Thông tin một dòng lỗi và phần stack trace tương ứng."""
+
     timestamp: str
     screen_id: Optional[str]
     summary: str
     details: str
 
+
 def _parse_param_line(line: str) -> List[Tuple[str, str]]:
-    """Parse a single 'Parameters:' line into [(val, typ), ...]."""
+    """Tách dòng Parameters thành danh sách giá trị + kiểu."""
     params: List[Tuple[str, str]] = []
     try:
         param_str = line.split("Parameters:", 1)[1].strip()
@@ -68,7 +77,7 @@ def _parse_param_line(line: str) -> List[Tuple[str, str]]:
     return params
 
 def parse_sql(file_path: str) -> List[SqlEntry]:
-    """Parse a log file and return a list of SqlEntry objects."""
+    """Đọc file log và gom danh sách các câu SQL."""
     entries: List[SqlEntry] = []
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -169,7 +178,7 @@ def parse_sql(file_path: str) -> List[SqlEntry]:
         return entries
 
 def parse_errors(file_path: str) -> List[ErrorEntry]:
-    """Parse a log file to extract error entries."""
+    """Đọc file log và gom danh sách lỗi kèm chi tiết."""
     errors: List[ErrorEntry] = []
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -217,7 +226,7 @@ def parse_errors(file_path: str) -> List[ErrorEntry]:
         return errors
 
 def format_sql(sql: str) -> str:
-    """Insert newlines before common SQL keywords to improve readability."""
+    """Chèn xuống dòng tại các từ khóa SQL để dễ đọc hơn."""
     keywords = [
         "ORDER BY", "GROUP BY", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN",
         "INSERT INTO", "VALUES", "DELETE FROM", "DELETE", "UPDATE",
@@ -237,111 +246,64 @@ def format_sql(sql: str) -> str:
     return "\n".join(lines)
 
 class LogViewerApp:
-    """Main application class encapsulating the Tkinter GUI and log parsing logic."""
+    """Lớp điều khiển giao diện xem và phân tích log MU."""
 
     def __init__(self, root: tk.Misc, icon_path: Optional[str] = None) -> None:
         self.root = root
         self.icon_path = icon_path or (DEFAULT_ICON_PATH if os.path.isfile(DEFAULT_ICON_PATH) else None)
-        self.root.title("MU Log Reader VIP Premium Supper Limited")
-        if self.icon_path:
-            try:
-                self.root.iconbitmap(self.icon_path)
-            except Exception:
-                pass
+        self._apply_icon(self.root)
         self.sql_entries: List[SqlEntry] = []
         self.error_entries: List[ErrorEntry] = []
 
         # Language handling
-        self.language_var = tk.StringVar(value="VI")
-        self.translations = {
-            "VI": {
-                "choose_log": "Open Log",
-                "log_type": "Loại log:",
-                "sql": "SQL",
-                "error": "ERROR",
-                "command_type": "Loại lệnh:",
-                "screen": "Màn hình:",
-                "screen_id": "ID màn hình",
-                "time": "Thời gian",
-                "command": "Lệnh",
-                "function": "Hàm",
-                "params": "Parameter",
-                "sql_filled": "SQL",
-                "summary": "Tóm tắt",
-                "details": "Chi tiết lỗi",
-                "copy": "Copy",
-                "close": "Đóng",
-                "copied": "Đã copy",
-                "sql_copied": "SQL đã được copy vào clipboard",
-                "details_copied": "Chi tiết đã được copy vào clipboard",
-                "sql_detail_title": "Chi tiết SQL",
-                "error_detail_title": "Chi tiết lỗi",
-                "error_summary": "Tóm tắt",
-                "error_details": "Chi tiết",
-                "field": "Trường",
-                "value": "Giá trị",
-                "keyword": "Từ khóa",
-                "search_btn": "Tìm",
-                "time_format_full": "yyyy-mm-dd hh:mm:ss",
-                "time_format_time": "hh:mm:ss",
-                "time_display": "Hiển thị thời gian",
-                "param_display": "Parameter",
-                "param_show": "Hiện",
-                "param_hide": "Ẩn",
-                "toggle_param_sql": "Chuyển Param/SQL",
-                "filters_section": "Bộ lọc",
-                "results_section": "Kết quả",
-            },
-            "JA": {
-                "choose_log": "ログ選択",
-                "log_type": "ログ種別:",
-                "sql": "SQL",
-                "error": "エラー",
-                "command_type": "コマンド種別:",
-                "screen": "画面:",
-                "screen_id": "画面ID",
-                "time": "日時",
-                "command": "コマンド",
-                "function": "関数",
-                "params": "パラメータ",
-                "sql_filled": "SQL",
-                "summary": "概要",
-                "details": "詳細",
-                "copy": "コピー",
-                "close": "閉じる",
-                "copied": "コピー済み",
-                "sql_copied": "SQLがクリップボードにコピーされました",
-                "details_copied": "詳細がクリップボードにコピーされました",
-                "sql_detail_title": "SQL詳細",
-                "error_detail_title": "エラー詳細",
-                "error_summary": "概要",
-                "error_details": "詳細",
-                "field": "フィールド",
-                "value": "値",
-                "keyword": "キーワード",
-                "search_btn": "検索",
-                "time_format_full": "yyyy-mm-dd hh:mm:ss",
-                "time_format_time": "hh:mm:ss",
-                "time_display": "時間表示",
-                "param_display": "パラメータ",
-                "param_show": "表示",
-                "param_hide": "非表示",
-                "toggle_param_sql": "パラメータ/SQL切替",
-                "filters_section": "フィルタ",
-                "results_section": "結果",
-            }
+        self._key_map = {
+            "choose_log": "log.btn.choose",
+            "log_type": "log.label.type",
+            "sql": "log.option.sql",
+            "error": "log.option.error",
+            "command_type": "log.label.command_type",
+            "screen": "log.label.screen",
+            "screen_id": "log.column.screen_id",
+            "time": "log.column.time",
+            "command": "log.column.command",
+            "function": "log.column.function",
+            "params": "log.column.params",
+            "sql_filled": "log.column.sql",
+            "summary": "log.column.summary",
+            "details": "log.column.details",
+            "copy": "log.btn.copy",
+            "close": "log.btn.close",
+            "copied": "log.msg.copied",
+            "sql_copied": "log.msg.sql_copied",
+            "details_copied": "log.msg.details_copied",
+            "sql_detail_title": "log.detail.sql_title",
+            "error_detail_title": "log.detail.error_title",
+            "error_summary": "log.column.summary",
+            "error_details": "log.column.details",
+            "field": "log.column.field",
+            "value": "log.column.value",
+            "keyword": "log.label.keyword",
+            "search_btn": "log.btn.search",
+            "time_format_full": "log.option.time_full",
+            "time_format_time": "log.option.time_time",
+            "time_display": "log.label.time_display",
+            "param_display": "log.label.param_display",
+            "param_show": "log.option.param_show",
+            "param_hide": "log.option.param_hide",
+            "toggle_param_sql": "log.btn.toggle_param_sql",
+            "filters_section": "log.section.filters",
+            "results_section": "log.section.results",
         }
 
-        def _(key: str) -> str:
-            lang = self.language_var.get()
-            return self.translations.get(lang, {}).get(key, self.translations["VI"].get(key, key))
-        self._ = _
+        def _(key: str, **kwargs) -> str:
+            full_key = self._key_map.get(key, f"log.{key}")
+            return i18n.translate(full_key, **kwargs)
 
-        try:
-            default_font = ("Segoe UI", 10)
-            self.root.option_add("*Font", default_font)
-        except Exception:
-            pass
+        self._ = _
+        self._lang_listener = self._handle_language_change
+        i18n.add_listener(self._lang_listener)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
         style = ttk.Style()
         try:
             style.theme_use(style.theme_use())
@@ -357,6 +319,7 @@ class LogViewerApp:
         # ----- UI Setup -----
         search_frame = ttk.LabelFrame(container, text=self._("filters_section"), padding=8, borderwidth=2, relief="ridge")
         search_frame.pack(fill="x", pady=(0, 8))
+        self.frm_filters = search_frame
 
         row1 = tk.Frame(search_frame)
         row1.pack(fill="x", padx=5, pady=(5, 2))
@@ -369,16 +332,6 @@ class LogViewerApp:
         self.rb_sql.pack(side="left", padx=(0, 5))
         self.rb_error = tk.Radiobutton(row1, text=self._("error"), variable=self.log_type_var, value="ERROR", command=self.update_filters)
         self.rb_error.pack(side="left", padx=(0, 5))
-
-        lang_frame = tk.Frame(row1)
-        lang_frame.pack(side="right")
-        lang_top = tk.Frame(lang_frame)
-        lang_top.pack(side="top", pady=(0, 2))
-        self.lbl_lang = tk.Label(lang_top, text="Lang:")
-        self.lbl_lang.pack(side="left")
-        self.combo_lang = ttk.Combobox(lang_top, textvariable=self.language_var, values=["VI", "JA"], state="readonly", width=4)
-        self.combo_lang.bind("<<ComboboxSelected>>", lambda e: self.update_language())
-        self.combo_lang.pack(side="left")
 
         row_screen = tk.Frame(search_frame)
         row_screen.pack(fill="x", padx=5, pady=(5, 2))
@@ -438,6 +391,7 @@ class LogViewerApp:
         self.columns_sql = columns_sql
         tree_frame = ttk.LabelFrame(container, text=self._("results_section"), padding=6, borderwidth=2, relief="ridge")
         tree_frame.pack(fill="both", expand=True, pady=(0, 8))
+        self.frm_results = tree_frame
         scroll_y = tk.Scrollbar(tree_frame, orient="vertical")
         scroll_y.pack(side="right", fill="y")
         scroll_x = tk.Scrollbar(tree_frame, orient="horizontal")
@@ -451,16 +405,9 @@ class LogViewerApp:
             yscrollcommand=scroll_y.set,
             xscrollcommand=scroll_x.set,
         )
-        headings = [
-            "ID màn hình",
-            "Thời gian",
-            "Lệnh",
-            "Hàm",
-            "Parameter",
-            "SQL (đã ghép)"
-        ]
-        for col, heading in zip(columns_sql, headings):
-            self.tree.heading(col, text=heading)
+        heading_keys = ["screen_id", "time", "command", "function", "params", "sql_filled"]
+        for col, key in zip(columns_sql, heading_keys):
+            self.tree.heading(col, text=self._(key))
             if col == "sql":
                 width = 500; stretch = True
             elif col == "params":
@@ -494,21 +441,21 @@ class LogViewerApp:
         self.tree.tag_configure("match", background="#fff2a8")
 
         # Initial language update
-        self.update_language()
+        self._apply_language()
 
-    def update_language(self) -> None:
-        """Update all UI text strings to the selected language."""
+    def _apply_language(self) -> None:
+        """Cập nhật toàn bộ text theo ngôn ngữ i18n hiện tại."""
         _ = self._
+        self.root.title(i18n.translate("log.title"))
+        if hasattr(self, "frm_filters"):
+            self.frm_filters.configure(text=_("filters_section"))
+        if hasattr(self, "frm_results"):
+            self.frm_results.configure(text=_("results_section"))
         self.btn_choose.configure(text=_("choose_log"))
         self.lbl_log_type.configure(text=_("log_type"))
         self.rb_sql.configure(text=_("sql"))
         self.rb_error.configure(text=_("error"))
-        self.lbl_lang.configure(text="言語:" if self.language_var.get() == "JA" else "Ngôn ngữ:")
         self.lbl_cmd.configure(text=_("command_type"))
-        labels_map = {"ALL": "ALL", "SELECT": "SELECT", "INSERT": "INSERT", "UPDATE": "UPDATE", "DELETE": "DELETE"}
-        for btn in self.cmd_buttons:
-            val = btn.cget("value")
-            btn.configure(text=labels_map.get(val, val))
         self.lbl_screen.configure(text=_("screen"))
         if self.log_type_var.get() == "SQL":
             self.tree.heading("screen", text=_("screen_id"))
@@ -526,13 +473,16 @@ class LogViewerApp:
         self.lbl_time_display.configure(text=_("time_display"))
         self.rb_time_full.configure(text=_("time_format_full"))
         self.rb_time_time.configure(text=_("time_format_time"))
-        # Update param display labels
         self.lbl_param_display.configure(text=_("param_display"))
         self.rb_param_show.configure(text=_("param_show"))
         self.rb_param_hide.configure(text=_("param_hide"))
 
+    def _handle_language_change(self, _: str) -> None:
+        """Lắng nghe thay đổi ngôn ngữ từ i18n."""
+        self._apply_language()
+
     def refresh_file(self) -> None:
-        """Reload the currently selected log file if one has been loaded."""
+        """Tải lại log đang mở nếu có."""
         file_path = getattr(self, "current_file", None)
         if not file_path:
             return
@@ -541,7 +491,11 @@ class LogViewerApp:
             self.error_entries = parse_errors(file_path)
         except Exception:
             import traceback
-            messagebox.showerror("Lỗi", traceback.format_exc())
+            messagebox.showerror(
+                i18n.translate(APP_TITLE_KEY),
+                self._("msg.read_error", error=traceback.format_exc()),
+                parent=self.root,
+            )
             return
         screens = sorted({entry.screen_id for entry in self.sql_entries + self.error_entries if entry.screen_id})
         self.combo_screen.configure(values=["ALL"] + screens)
@@ -550,8 +504,11 @@ class LogViewerApp:
         self.refresh_table()
 
     def choose_file(self) -> None:
-        """Prompt the user to select a log file and parse it."""
-        file_path = filedialog.askopenfilename(title="Chọn file log", filetypes=[("Log files", "*.log"), ("All files", "*.*")])
+        """Chọn file log và tiến hành phân tích."""
+        file_path = filedialog.askopenfilename(
+            title=self._("choose_log"),
+            filetypes=[("Log files", "*.log"), ("All files", "*.*")],
+        )
         if not file_path:
             return
         try:
@@ -559,7 +516,11 @@ class LogViewerApp:
             self.error_entries = parse_errors(file_path)
         except Exception:
             import traceback
-            messagebox.showerror("Lỗi", traceback.format_exc())
+            messagebox.showerror(
+                i18n.translate(APP_TITLE_KEY),
+                self._("msg.read_error", error=traceback.format_exc()),
+                parent=self.root,
+            )
             return
         screens = sorted({entry.screen_id for entry in self.sql_entries + self.error_entries if entry.screen_id})
         self.combo_screen.configure(values=["ALL"] + screens)
@@ -568,16 +529,10 @@ class LogViewerApp:
         self.refresh_table()
 
     def update_filters(self) -> None:
-        """Update the UI when switching between SQL and ERROR logs."""
+        """Điều chỉnh bố cục và tiêu đề khi đổi loại log (SQL/ERROR)."""
         if self.log_type_var.get() == "SQL":
             self.sql_command_frame.pack(side="left")
             self.tree.configure(columns=("screen", "timestamp", "command", "function", "params", "sql"))
-            self.tree.heading("screen", text="ID màn hình")
-            self.tree.heading("timestamp", text="Thời gian")
-            self.tree.heading("command", text="Lệnh")
-            self.tree.heading("function", text="Hàm")
-            self.tree.heading("params", text="Parameter")
-            self.tree.heading("sql", text="SQL (đã ghép)")
             self.tree.column("screen", width=100, stretch=False)
             self.tree.column("timestamp", width=130, stretch=False)
             self.tree.column("command", width=80, stretch=False)
@@ -587,17 +542,14 @@ class LogViewerApp:
         else:
             self.sql_command_frame.pack_forget()
             self.tree.configure(columns=("timestamp", "screen", "summary"))
-            self.tree.heading("timestamp", text="Thời gian")
-            self.tree.heading("screen", text="ID màn hình")
-            self.tree.heading("summary", text="Tóm tắt")
             self.tree.column("timestamp", width=130, stretch=False)
             self.tree.column("screen", width=100, stretch=False)
             self.tree.column("summary", width=600, stretch=True)
-        self.update_language()
+        self._apply_language()
         self.refresh_table()
 
     def refresh_table(self) -> None:
-        """Refresh the tree view based on current filters and log type."""
+        """Làm mới bảng kết quả theo bộ lọc hiện tại."""
         for row in self.tree.get_children():
             self.tree.delete(row)
         selected_screen = self.screen_var.get()
@@ -718,7 +670,7 @@ class LogViewerApp:
             self.tree.column("summary", width=max(200, max_lengths["summary"] * char_w), stretch=True)
 
     def on_double_click(self, event: tk.Event) -> None:
-        """Handle double-click on a row."""
+        """Xử lý thao tác double-click để xem chi tiết."""
         selection = self.tree.selection()
         if not selection:
             return
@@ -899,7 +851,7 @@ class LogViewerApp:
             tk.Button(btn_frame, text=_("close"), command=popup.destroy).pack(side="right", padx=5)
 
     def map_params_to_fields(self, raw_sql: str, params: List[str]) -> List[Tuple[Optional[str], str]]:
-        """Map parameter values back to corresponding columns/conditions in raw SQL."""
+        """Ghép giá trị tham số về cột/điều kiện tương ứng trong SQL gốc."""
         # Insert: map param to columns
         m = re.search(r"insert\s+into\s+\S+\s*\(([^)]+)\)", raw_sql, re.IGNORECASE)
         if m:
@@ -941,6 +893,7 @@ class LogViewerApp:
         return results
 
     def _apply_icon(self, window: tk.Misc) -> None:
+        """Đặt biểu tượng cửa sổ nếu đường dẫn hợp lệ."""
         if not self.icon_path:
             return
         try:
@@ -948,12 +901,24 @@ class LogViewerApp:
         except Exception:
             pass
 
+    def _cleanup_language_listener(self) -> None:
+        """Bỏ đăng ký listener i18n khi cửa sổ đóng lại."""
+        if getattr(self, "_lang_listener", None):
+            i18n.remove_listener(self._lang_listener)
+            self._lang_listener = None
+
+    def _on_close(self) -> None:
+        """Đóng cửa sổ log viewer và thu dọn tài nguyên."""
+        self._cleanup_language_listener()
+        if self.root.winfo_exists():
+            self.root.destroy()
+
     def perform_search(self) -> None:
-        """Trigger a table refresh based on the current search term."""
+        """Kích hoạt tìm kiếm theo từ khóa hiện tại."""
         self.refresh_table()
 
     def copy_all_or_selected(self, event=None) -> None:
-        """Copy selected rows to clipboard as TSV. If none selected, copy all rows."""
+        """Copy các dòng được chọn (hoặc toàn bộ nếu không chọn) vào clipboard định dạng TSV."""
         columns = self.tree["columns"]
         items = self.tree.selection()
         if not items:
@@ -979,17 +944,18 @@ def open_log_viewer(parent: Optional[tk.Misc] = None, icon_path: Optional[str] =
         resolved_icon = DEFAULT_ICON_PATH
     if parent is not None:
         window = tk.Toplevel(parent)
-        window.title("MU Log Reader VIP Premium Supper Limited")
         window.geometry("1200x800")
         window.minsize(960, 640)
         window.transient(parent)
-        LogViewerApp(window, resolved_icon)
+        app = LogViewerApp(window, resolved_icon)
+        window.log_app = app
         window.focus_set()
         return window
     root = tk.Tk()
     root.geometry("1200x800")
     root.minsize(960, 640)
-    LogViewerApp(root, resolved_icon)
+    app = LogViewerApp(root, resolved_icon)
+    root.log_app = app
     root.mainloop()
     return root
 

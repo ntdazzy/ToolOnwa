@@ -1,5 +1,5 @@
-﻿"""
-Backup and restore screens.
+"""
+Màn hình Backup/Restore dùng sao lưu và phục hồi dữ liệu.
 """
 from __future__ import annotations
 
@@ -14,6 +14,9 @@ from typing import Dict, List, Optional
 
 from screen.DB import db_utils
 from screen.DB.widgets import DataGrid, LoadingPopup
+from core import i18n
+
+APP_TITLE_KEY = "common.app_title"
 
 
 class BackupRestoreBase(tk.Toplevel):
@@ -23,16 +26,19 @@ class BackupRestoreBase(tk.Toplevel):
 
     GEOMETRY = "520x640"
 
-    def __init__(self, parent: tk.Widget, connection: Dict[str, str], title: str):
+    def __init__(self, parent: tk.Widget, connection: Dict[str, str], title_key: str):
+        """Khởi tạo cửa sổ nền tảng cho các màn hình backup/restore."""
         super().__init__(parent)
         self.parent = parent
         self.conn_info = connection
         self.conn = None
         self.current_owner = connection.get("user", "").upper()
-        self.title(title)
+        self._title_key = title_key
+        self.title(self._t(self._title_key))
         self.geometry(self.GEOMETRY)
         self.minsize(480, 560)
         self.resizable(True, True)
+        self._set_icon()
 
         self._table_items: List[Dict[str, str]] = []
         self._table_view: List[Dict[str, str]] = []
@@ -40,36 +46,42 @@ class BackupRestoreBase(tk.Toplevel):
         self._columns: List[str] = []
         self._column_meta: Dict[str, dict] = {}
         self._loader: Optional[LoadingPopup] = None
+        self._current_table_label: str = "..."
 
         self.var_search = tk.StringVar()
         self.var_selected_table = tk.StringVar()
 
         self._build_ui()
+        self._lang_listener = self._handle_language_change
+        i18n.add_listener(self._lang_listener)
+        self._apply_language()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(120, self._connect_async)
 
     # ------------------------------------------------------------------
     def _build_ui(self):
-        main = ttk.Frame(self, padding=8)
-        main.pack(fill="both", expand=True)
-        main.rowconfigure(1, weight=1)
-        main.columnconfigure(0, weight=1)
+        """Xây dựng bố cục chung gồm khung tìm kiếm và phần thân."""
+        self.frm_main = ttk.Frame(self, padding=8)
+        self.frm_main.pack(fill="both", expand=True)
+        self.frm_main.rowconfigure(1, weight=1)
+        self.frm_main.columnconfigure(0, weight=1)
 
-        search_group = ttk.LabelFrame(main, text="Tìm kiếm", padding=6)
-        search_group.grid(row=0, column=0, sticky="nsew", pady=(0, 6))
-        search_group.columnconfigure(0, weight=1)
+        self.grp_search = ttk.LabelFrame(self.frm_main, text=self._t("backup.section.search"), padding=6)
+        self.grp_search.grid(row=0, column=0, sticky="nsew", pady=(0, 6))
+        self.grp_search.columnconfigure(0, weight=1)
 
-        ttk.Label(search_group, text="Table Name").grid(row=0, column=0, sticky="w")
-        ent = ttk.Entry(search_group, textvariable=self.var_search)
-        ent.grid(row=1, column=0, sticky="ew", pady=4)
-        ent.bind("<KeyRelease>", lambda e: self._filter_tables())
+        self.lbl_table = ttk.Label(self.grp_search, text=self._t("backup.label.table"))
+        self.lbl_table.grid(row=0, column=0, sticky="w")
+        self.ent_search = ttk.Entry(self.grp_search, textvariable=self.var_search)
+        self.ent_search.grid(row=1, column=0, sticky="ew", pady=4)
+        self.ent_search.bind("<KeyRelease>", lambda _event: self._filter_tables())
 
-        self.list_tables = tk.Listbox(search_group, height=8)
+        self.list_tables = tk.Listbox(self.grp_search, height=8)
         self.list_tables.grid(row=2, column=0, sticky="nsew")
         self.list_tables.bind("<<ListboxSelect>>", self._handle_table_select)
-        search_group.rowconfigure(2, weight=1)
+        self.grp_search.rowconfigure(2, weight=1)
 
-        self.body = ttk.Frame(main)
+        self.body = ttk.Frame(self.frm_main)
         self.body.grid(row=1, column=0, sticky="nsew")
         self.body.columnconfigure(0, weight=1)
         self.body.rowconfigure(0, weight=1)
@@ -81,6 +93,7 @@ class BackupRestoreBase(tk.Toplevel):
 
     # ------------------------------------------------------------------
     def _connect_async(self):
+        """Kết nối cơ sở dữ liệu và lấy danh sách bảng ở luồng nền."""
         def worker():
             try:
                 self.conn = db_utils.connect_oracle(
@@ -97,20 +110,22 @@ class BackupRestoreBase(tk.Toplevel):
                 self.after(0, lambda m=msg: self._show_error(m))
                 return
             except Exception as exc:
-                msg = f"Lỗi kết nối: {exc}"
+                msg = self._t("common.msg.connection_error", error=str(exc))
                 self.after(0, lambda m=msg: self._show_error(m))
                 return
             self.after(0, lambda: self._init_tables(tables))
 
-        self._show_loading("Đang tải danh sách bảng...")
+        self._show_loading(self._t("common.loading_tables"))
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_error(self, msg: str):
+        """Hiển thị lỗi và đóng cửa sổ khi không thể tiếp tục."""
         self._hide_loading()
-        messagebox.showerror("Tool VIP", msg, parent=self)
+        messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
         self.destroy()
 
     def _init_tables(self, tables: List[str]):
+        """Nạp danh sách bảng truy cập được vào listbox."""
         self._hide_loading()
         items: List[Dict[str, str]] = []
         for raw in tables:
@@ -131,8 +146,10 @@ class BackupRestoreBase(tk.Toplevel):
             self.var_selected_table.set("")
             self._columns.clear()
             self._column_meta.clear()
+            self._current_table_label = "..."
 
     def _filter_tables(self):
+        """Lọc danh sách bảng theo từ khóa tìm kiếm."""
         keyword = self.var_search.get().strip().upper()
         current_full = self._active_table["full"] if self._active_table else None
         if keyword:
@@ -157,9 +174,11 @@ class BackupRestoreBase(tk.Toplevel):
             self.list_tables.selection_clear(0, tk.END)
             self._columns.clear()
             self._column_meta.clear()
+            self._current_table_label = "..."
             self.on_table_ready("")
 
     def _handle_table_select(self, _event=None):
+        """Xử lý việc chọn bảng từ danh sách."""
         selection = self.list_tables.curselection()
         if not selection:
             return
@@ -171,25 +190,29 @@ class BackupRestoreBase(tk.Toplevel):
             return
         self._active_table = item
         self.var_selected_table.set(item["display"])
+        self._current_table_label = item["display"]
         self._load_table_metadata(item)
 
     def _load_table_metadata(self, item: Dict[str, str]):
+        """Đọc metadata của bảng được chọn."""
         if not self.conn:
             return
         try:
             columns = db_utils.fetch_table_columns(self.conn, item["full"], self.current_owner)
         except Exception as exc:
-            messagebox.showerror("Tool VIP", f"Lỗi đọc metadata: {exc}", parent=self)
+            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.metadata_error", error=str(exc)), parent=self)
             return
         self._columns = [c["column_name"] for c in columns]
         self._column_meta = {c["column_name"]: c for c in columns}
         self.on_table_ready(item["full"])
 
     def on_table_ready(self, table: str):
+        """Hook cho lớp con khi metadata đã sẵn sàng."""
         raise NotImplementedError
 
     # ------------------------------------------------------------------
     def _split_table(self, raw: str) -> tuple[str, str]:
+        """Tách owner và tên bảng, fallback về owner hiện tại khi thiếu."""
         if raw and "." in raw:
             return db_utils.split_owner_table(raw, self.current_owner)
         if self._active_table:
@@ -197,6 +220,7 @@ class BackupRestoreBase(tk.Toplevel):
         return db_utils.split_owner_table(raw, self.current_owner)
 
     def _append_log(self, text: str):
+        """Ghi log vào vùng hiển thị và cuộn xuống cuối."""
         widget = getattr(self, "txt_log", None)
         if widget is None:
             return
@@ -204,6 +228,7 @@ class BackupRestoreBase(tk.Toplevel):
         widget.see(tk.END)
 
     def _on_close(self):
+        """Đóng cửa sổ và giải phóng kết nối nếu có."""
         self._hide_loading()
         try:
             if self.conn:
@@ -213,11 +238,13 @@ class BackupRestoreBase(tk.Toplevel):
         self.destroy()
 
     def _show_loading(self, message: str):
+        """Hiển thị popup đang xử lý."""
         if self._loader:
             return
         self._loader = LoadingPopup(self, message)
 
     def _hide_loading(self):
+        """Đóng popup đang xử lý nếu tồn tại."""
         if not self._loader:
             return
         self._loader.close()
@@ -225,17 +252,18 @@ class BackupRestoreBase(tk.Toplevel):
 
     # ------------------------------------------------------------------
     def _run_statements(self, sql_text: str) -> bool:
+        """Thực thi lần lượt các câu SQL đã chuẩn bị."""
         if not self.conn:
-            messagebox.showerror("Tool VIP", "Chưa kết nối database.", parent=self)
+            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.not_connected"), parent=self)
             return False
         statements = [stmt.strip() for stmt in re.split(r";\s*(?:\n|$)", sql_text) if stmt.strip()]
         if not statements:
-            messagebox.showwarning("Tool VIP", "Không có câu lệnh để thực thi.", parent=self)
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("backup.msg.no_statement"), parent=self)
             return False
         try:
             cur = self.conn.cursor()
         except Exception as exc:
-            messagebox.showerror("Tool VIP", f"Lỗi tạo cursor: {exc}", parent=self)
+            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.cursor_error", error=str(exc)), parent=self)
             return False
 
         try:
@@ -245,15 +273,15 @@ class BackupRestoreBase(tk.Toplevel):
                     cur.execute(stmt)
                 except Exception as exc:
                     if self._should_ignore_drop(stmt, exc):
-                        self._append_log("  (Bảng không tồn tại, bỏ qua DROP)")
+                        self._append_log("  " + self._t("backup.log.skip_drop"))
                         continue
                     self.conn.rollback()
                     self._append_log(f"  ERROR: {exc}")
-                    messagebox.showerror("Tool VIP", f"Lỗi thực thi: {exc}", parent=self)
+                    messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.execute_error", error=str(exc)), parent=self)
                     return False
             self.conn.commit()
-            self._append_log("Hoàn thành.")
-            messagebox.showinfo("Tool VIP", "Thực thi thành công.", parent=self)
+            self._append_log(self._t("backup.log.complete"))
+            messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("backup.msg.execute_success"), parent=self)
             return True
         finally:
             try:
@@ -263,60 +291,94 @@ class BackupRestoreBase(tk.Toplevel):
 
     @staticmethod
     def _should_ignore_drop(statement: str, exc: Exception) -> bool:
+        """Kiểm tra xem có thể bỏ qua lỗi DROP do bảng không tồn tại hay không."""
         text = statement.strip().upper()
         if not text.startswith("DROP"):
             return False
         err = str(exc).upper()
         return "ORA-00942" in err or "TABLE OR VIEW DOES NOT EXIST" in err
 
+    def destroy(self):
+        """Hủy cửa sổ và gỡ listener ngôn ngữ."""
+        if hasattr(self, "_lang_listener"):
+            i18n.remove_listener(self._lang_listener)
+        super().destroy()
+
+    def _handle_language_change(self, _lang: str) -> None:
+        """Callback khi thay đổi ngôn ngữ."""
+        self._apply_language()
+
+    def _apply_language(self) -> None:
+        """Áp dụng chuỗi dịch cho các thành phần giao diện chung."""
+        self.title(self._t(self._title_key))
+        if hasattr(self, "grp_search"):
+            self.grp_search.configure(text=self._t("backup.section.search"))
+        if hasattr(self, "lbl_table"):
+            self.lbl_table.configure(text=self._t("backup.label.table"))
+
+    def _set_icon(self) -> None:
+        """Áp dụng biểu tượng ứng dụng nếu khả dụng."""
+        try:
+            self.iconbitmap("icons/logo.ico")
+        except Exception:
+            pass
+
+    def _t(self, key: str, **kwargs) -> str:
+        """Tiện ích truy xuất chuỗi i18n."""
+        return i18n.translate(key, **kwargs)
+
 
 class BackupWindow(BackupRestoreBase):
-    """
-    Backup screen: build backup table with optional SQL customisation.
-    """
+    """Màn hình tạo bảng backup với khả năng tùy chỉnh SQL."""
 
     def __init__(self, parent: tk.Widget, connection: Dict[str, str]):
-        super().__init__(parent, connection, title="Backup Table")
+        super().__init__(parent, connection, title_key="backup.title")
 
     def _build_body(self, parent: ttk.Frame):
+        """Xây dựng giao diện đặc thù cho tác vụ backup."""
         parent.columnconfigure(0, weight=1)
 
-        ttk.Label(parent, text="Bảng nguồn").grid(row=0, column=0, sticky="w")
+        self.lbl_source = ttk.Label(parent, text=self._t("backup.label.source_table"))
+        self.lbl_source.grid(row=0, column=0, sticky="w")
         self.ent_source = ttk.Entry(parent, textvariable=self.var_selected_table, state="readonly")
         self.ent_source.grid(row=1, column=0, sticky="ew", pady=(0, 6))
 
-        ttk.Label(parent, text="Tên bảng backup").grid(row=2, column=0, sticky="w")
+        self.lbl_backup = ttk.Label(parent, text=self._t("backup.label.backup_table"))
+        self.lbl_backup.grid(row=2, column=0, sticky="w")
         self.var_backup_name = tk.StringVar()
         self.ent_backup = ttk.Entry(parent, textvariable=self.var_backup_name)
         self.ent_backup.grid(row=3, column=0, sticky="ew", pady=(0, 10))
 
-        sql_frame = ttk.LabelFrame(parent, text="SQL", padding=6)
-        sql_frame.grid(row=4, column=0, sticky="nsew")
-        sql_frame.columnconfigure(0, weight=1)
-        sql_frame.rowconfigure(0, weight=1)
+        self.frm_sql_section = ttk.LabelFrame(parent, text=self._t("backup.section.sql"), padding=6)
+        self.frm_sql_section.grid(row=4, column=0, sticky="nsew")
+        self.frm_sql_section.columnconfigure(0, weight=1)
+        self.frm_sql_section.rowconfigure(0, weight=1)
 
-        self.txt_sql = ScrolledText(sql_frame, height=10, wrap="word")
+        self.txt_sql = ScrolledText(self.frm_sql_section, height=10, wrap="word")
         self.txt_sql.grid(row=0, column=0, sticky="nsew")
 
-        btns = ttk.Frame(parent)
-        btns.grid(row=5, column=0, sticky="ew", pady=6)
-        btns.columnconfigure(0, weight=1)
-        btns.columnconfigure(1, weight=1)
-        ttk.Button(btns, text="Cập nhật SQL", command=self._fill_default_sql_backup).grid(row=0, column=0, sticky="ew", padx=(0, 4))
-        ttk.Button(btns, text="Thực thi", command=self._execute).grid(row=0, column=1, sticky="ew")
+        self.frm_buttons = ttk.Frame(parent)
+        self.frm_buttons.grid(row=5, column=0, sticky="ew", pady=6)
+        self.frm_buttons.columnconfigure(0, weight=1)
+        self.frm_buttons.columnconfigure(1, weight=1)
+        self.btn_refresh_sql = ttk.Button(self.frm_buttons, text=self._t("backup.btn.refresh_sql"), command=self._fill_default_sql_backup)
+        self.btn_refresh_sql.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self.btn_execute = ttk.Button(self.frm_buttons, text=self._t("backup.btn.execute"), command=self._execute)
+        self.btn_execute.grid(row=0, column=1, sticky="ew")
 
-        log_frame = ttk.LabelFrame(parent, text="Log", padding=6)
-        log_frame.grid(row=6, column=0, sticky="nsew")
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
+        self.frm_log = ttk.LabelFrame(parent, text=self._t("backup.section.log"), padding=6)
+        self.frm_log.grid(row=6, column=0, sticky="nsew")
+        self.frm_log.columnconfigure(0, weight=1)
+        self.frm_log.rowconfigure(0, weight=1)
 
-        self.txt_log = ScrolledText(log_frame, height=8, wrap="word", state="normal")
+        self.txt_log = ScrolledText(self.frm_log, height=8, wrap="word", state="normal")
         self.txt_log.grid(row=0, column=0, sticky="nsew")
 
         parent.rowconfigure(4, weight=1)
         parent.rowconfigure(6, weight=1)
 
     def on_table_ready(self, table: str):
+        """Cập nhật thông tin khi bảng nguồn đã sẵn sàng."""
         if not table:
             self.var_backup_name.set("")
             self.txt_sql.delete("1.0", tk.END)
@@ -324,9 +386,10 @@ class BackupWindow(BackupRestoreBase):
         owner, name = self._split_table(table)
         default_name = f"{owner}.{name}_BK_{dt.datetime.now().strftime('%Y%m%d')}"
         self.var_backup_name.set(default_name)
-        self._fill_default_sql()
+        self._fill_default_sql_backup()
 
-    def _fill_default_sql(self):
+    def _fill_default_sql_backup(self):
+        """Sinh câu SQL tạo bảng backup từ bảng nguồn hiện tại."""
         table = self.var_selected_table.get().strip()
         backup = self.var_backup_name.get().strip()
         if not table or not backup:
@@ -344,67 +407,89 @@ class BackupWindow(BackupRestoreBase):
         self.txt_sql.insert(tk.END, default_sql)
 
     def _execute(self):
+        """Thực thi các câu lệnh backup đã được chuẩn bị."""
         sql_text = self.txt_sql.get("1.0", tk.END)
         self._run_statements(sql_text)
 
+    def _apply_language(self) -> None:
+        """Cập nhật chuỗi dịch cho các thành phần của màn hình backup."""
+        super()._apply_language()
+        if hasattr(self, "lbl_source"):
+            self.lbl_source.configure(text=self._t("backup.label.source_table"))
+        if hasattr(self, "lbl_backup"):
+            self.lbl_backup.configure(text=self._t("backup.label.backup_table"))
+        if hasattr(self, "frm_sql_section"):
+            self.frm_sql_section.configure(text=self._t("backup.section.sql"))
+        if hasattr(self, "frm_log"):
+            self.frm_log.configure(text=self._t("backup.section.log"))
+        if hasattr(self, "btn_refresh_sql"):
+            self.btn_refresh_sql.configure(text=self._t("backup.btn.refresh_sql"))
+        if hasattr(self, "btn_execute"):
+            self.btn_execute.configure(text=self._t("backup.btn.execute"))
+
 
 class RestoreFromBackupWindow(BackupRestoreBase):
-    """
-    Restore data from an existing backup table.
-    """
+    """Khôi phục dữ liệu vào bảng đích từ bảng backup đã có."""
 
     def __init__(self, parent: tk.Widget, connection: Dict[str, str]):
-        super().__init__(parent, connection, title="Restore From Backup Table")
+        super().__init__(parent, connection, title_key="backup.restore_backup.title")
 
     def _build_body(self, parent: ttk.Frame):
+        """Xây dựng giao diện dành cho restore từ bảng backup."""
         parent.columnconfigure(0, weight=1)
 
-        ttk.Label(parent, text="Bảng đích").grid(row=0, column=0, sticky="w")
+        self.lbl_target = ttk.Label(parent, text=self._t("backup.label.target_table"))
+        self.lbl_target.grid(row=0, column=0, sticky="w")
         self.ent_target = ttk.Entry(parent, textvariable=self.var_selected_table, state="readonly")
         self.ent_target.grid(row=1, column=0, sticky="ew", pady=(0, 6))
 
-        ttk.Label(parent, text="Bảng backup nguồn").grid(row=2, column=0, sticky="w")
+        self.lbl_backup_source = ttk.Label(parent, text=self._t("backup.label.backup_source_table"))
+        self.lbl_backup_source.grid(row=2, column=0, sticky="w")
         self.var_backup_name = tk.StringVar()
         self.ent_backup = ttk.Entry(parent, textvariable=self.var_backup_name)
         self.ent_backup.grid(row=3, column=0, sticky="ew", pady=(0, 10))
 
-        sql_frame = ttk.LabelFrame(parent, text="SQL", padding=6)
-        sql_frame.grid(row=4, column=0, sticky="nsew")
-        sql_frame.columnconfigure(0, weight=1)
-        sql_frame.rowconfigure(0, weight=1)
+        self.frm_sql_section = ttk.LabelFrame(parent, text=self._t("backup.section.sql"), padding=6)
+        self.frm_sql_section.grid(row=4, column=0, sticky="nsew")
+        self.frm_sql_section.columnconfigure(0, weight=1)
+        self.frm_sql_section.rowconfigure(0, weight=1)
 
-        self.txt_sql = ScrolledText(sql_frame, height=10, wrap="word")
+        self.txt_sql = ScrolledText(self.frm_sql_section, height=10, wrap="word")
         self.txt_sql.grid(row=0, column=0, sticky="nsew")
 
-        btns = ttk.Frame(parent)
-        btns.grid(row=5, column=0, sticky="ew", pady=6)
-        btns.columnconfigure(0, weight=1)
-        btns.columnconfigure(1, weight=1)
-        ttk.Button(btns, text="Cập nhật SQL", command=self._fill_default_sql_backup).grid(row=0, column=0, sticky="ew", padx=(0, 4))
-        ttk.Button(btns, text="Thực thi", command=self._execute).grid(row=0, column=1, sticky="ew")
+        self.frm_buttons = ttk.Frame(parent)
+        self.frm_buttons.grid(row=5, column=0, sticky="ew", pady=6)
+        self.frm_buttons.columnconfigure(0, weight=1)
+        self.frm_buttons.columnconfigure(1, weight=1)
+        self.btn_refresh_sql = ttk.Button(self.frm_buttons, text=self._t("backup.btn.refresh_sql"), command=self._fill_backup_sql)
+        self.btn_refresh_sql.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self.btn_execute = ttk.Button(self.frm_buttons, text=self._t("backup.btn.execute"), command=self._execute)
+        self.btn_execute.grid(row=0, column=1, sticky="ew")
 
-        log_frame = ttk.LabelFrame(parent, text="Log", padding=6)
-        log_frame.grid(row=6, column=0, sticky="nsew")
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
+        self.frm_log = ttk.LabelFrame(parent, text=self._t("backup.section.log"), padding=6)
+        self.frm_log.grid(row=6, column=0, sticky="nsew")
+        self.frm_log.columnconfigure(0, weight=1)
+        self.frm_log.rowconfigure(0, weight=1)
 
-        self.txt_log = ScrolledText(log_frame, height=8, wrap="word", state="normal")
+        self.txt_log = ScrolledText(self.frm_log, height=8, wrap="word", state="normal")
         self.txt_log.grid(row=0, column=0, sticky="nsew")
 
         parent.rowconfigure(4, weight=1)
         parent.rowconfigure(6, weight=1)
 
-def on_table_ready(self, table: str):
-    if not table:
-        self.txt_sql.delete("1.0", tk.END)
-        self.var_backup_name.set("")
-        return
-    owner, name = self._split_table(table)
-    pattern = f"{owner}.{name}_BK_{dt.datetime.now().strftime('%Y%m%d')}"
-    self.var_backup_name.set(pattern)
-    self._fill_default_sql()
+    def on_table_ready(self, table: str):
+        """Đề xuất tên backup và sinh câu SQL mặc định."""
+        if not table:
+            self.txt_sql.delete("1.0", tk.END)
+            self.var_backup_name.set("")
+            return
+        owner, name = self._split_table(table)
+        pattern = f"{owner}.{name}_BK_{dt.datetime.now().strftime('%Y%m%d')}"
+        self.var_backup_name.set(pattern)
+        self._fill_restore_sql()
 
-    def _fill_default_sql(self):
+    def _fill_restore_sql(self):
+        """Sinh SQL restore dữ liệu từ bảng backup sang bảng đích."""
         target = self.var_selected_table.get().strip()
         backup = self.var_backup_name.get().strip()
         if not target or not backup:
@@ -420,7 +505,8 @@ def on_table_ready(self, table: str):
         self.txt_sql.delete("1.0", tk.END)
         self.txt_sql.insert(tk.END, default_sql)
 
-    def _fill_default_sql_backup(self):
+    def _fill_backup_sql(self):
+        """Sinh SQL để tái tạo bảng backup từ bảng đích."""
         table = self.var_selected_table.get().strip()
         backup = self.var_backup_name.get().strip()
         if not table or not backup:
@@ -429,15 +515,34 @@ def on_table_ready(self, table: str):
         owner_bk, bk = self._split_table(backup)
         full_src = f"{owner_src}.{src}"
         full_bk = f"{owner_bk}.{bk}"
-        default_sql = (f"DROP TABLE {full_bk};\n"
-                       f"CREATE TABLE {full_bk} AS\n"
-                       f"SELECT *\nFROM {full_src};")
+        default_sql = (
+            f"DROP TABLE {full_bk};\n"
+            f"CREATE TABLE {full_bk} AS\n"
+            f"SELECT *\nFROM {full_src};"
+        )
         self.txt_sql.delete("1.0", tk.END)
         self.txt_sql.insert(tk.END, default_sql)
 
     def _execute(self):
+        """Thực thi câu SQL hiện tại."""
         sql_text = self.txt_sql.get("1.0", tk.END)
         self._run_statements(sql_text)
+
+    def _apply_language(self) -> None:
+        """Cập nhật chuỗi dịch cho các thành phần của màn hình restore."""
+        super()._apply_language()
+        if hasattr(self, "lbl_target"):
+            self.lbl_target.configure(text=self._t("backup.label.target_table"))
+        if hasattr(self, "lbl_backup_source"):
+            self.lbl_backup_source.configure(text=self._t("backup.label.backup_source_table"))
+        if hasattr(self, "frm_sql_section"):
+            self.frm_sql_section.configure(text=self._t("backup.section.sql"))
+        if hasattr(self, "frm_log"):
+            self.frm_log.configure(text=self._t("backup.section.log"))
+        if hasattr(self, "btn_refresh_sql"):
+            self.btn_refresh_sql.configure(text=self._t("backup.btn.refresh_sql"))
+        if hasattr(self, "btn_execute"):
+            self.btn_execute.configure(text=self._t("backup.btn.execute"))
 
 
 class RestoreFromCSVWindow(BackupRestoreBase):
@@ -450,64 +555,74 @@ class RestoreFromCSVWindow(BackupRestoreBase):
     def __init__(self, parent: tk.Widget, connection: Dict[str, str]):
         self.imported_rows: List[Dict[str, str]] = []
         self.csv_headers: List[str] = []
-        super().__init__(parent, connection, title="Restore From CSV")
+        super().__init__(parent, connection, title_key="backup.restore_csv.title")
 
     def _build_body(self, parent: ttk.Frame):
+        """Xây dựng giao diện dành cho restore từ CSV."""
         parent.columnconfigure(0, weight=1)
         parent.rowconfigure(4, weight=1)
 
-        ttk.Label(parent, text="Bảng đích").grid(row=0, column=0, sticky="w")
+        self.lbl_target = ttk.Label(parent, text=self._t("backup.label.target_table"))
+        self.lbl_target.grid(row=0, column=0, sticky="w")
         self.ent_target = ttk.Entry(parent, textvariable=self.var_selected_table, state="readonly")
         self.ent_target.grid(row=1, column=0, sticky="ew", pady=(0, 6))
 
-        actions = ttk.Frame(parent)
-        actions.grid(row=2, column=0, sticky="ew", pady=(0, 4))
-        actions.columnconfigure(0, weight=1)
-        ttk.Button(actions, text="Import CSV", command=self._import_csv).grid(row=0, column=0, sticky="w")
-        self.lbl_file = ttk.Label(actions, text="Chưa chọn file")
+        self.frm_actions = ttk.Frame(parent)
+        self.frm_actions.grid(row=2, column=0, sticky="ew", pady=(0, 4))
+        self.frm_actions.columnconfigure(0, weight=1)
+        self.btn_import_csv = ttk.Button(self.frm_actions, text=self._t("backup.btn.import_csv"), command=self._import_csv)
+        self.btn_import_csv.grid(row=0, column=0, sticky="w")
+        self.lbl_file = ttk.Label(self.frm_actions, text=self._t("backup.label.no_file"))
         self.lbl_file.grid(row=0, column=1, sticky="w", padx=(12, 0))
 
-        preview_frame = ttk.LabelFrame(parent, text="Data preview", padding=4)
-        preview_frame.grid(row=3, column=0, sticky="nsew", pady=(0, 6))
-        preview_frame.columnconfigure(0, weight=1)
-        preview_frame.rowconfigure(0, weight=1)
+        self.frm_preview = ttk.LabelFrame(parent, text=self._t("backup.section.preview"), padding=4)
+        self.frm_preview.grid(row=3, column=0, sticky="nsew", pady=(0, 6))
+        self.frm_preview.columnconfigure(0, weight=1)
+        self.frm_preview.rowconfigure(0, weight=1)
 
-        self.preview_grid = DataGrid(preview_frame)
+        self.preview_grid = DataGrid(self.frm_preview)
         self.preview_grid.grid(row=0, column=0, sticky="nsew")
 
-        btns = ttk.Frame(parent)
-        btns.grid(row=4, column=0, sticky="ew", pady=(0, 6))
-        btns.columnconfigure(0, weight=1)
-        btns.columnconfigure(1, weight=1)
-        ttk.Button(btns, text="Xóa dữ liệu", command=self._clear_preview).grid(row=0, column=0, sticky="ew", padx=(0, 4))
-        ttk.Button(btns, text="Thực thi", command=self._execute_restore).grid(row=0, column=1, sticky="ew")
+        self.frm_preview_buttons = ttk.Frame(parent)
+        self.frm_preview_buttons.grid(row=4, column=0, sticky="ew", pady=(0, 6))
+        self.frm_preview_buttons.columnconfigure(0, weight=1)
+        self.frm_preview_buttons.columnconfigure(1, weight=1)
+        self.btn_clear_preview = ttk.Button(self.frm_preview_buttons, text=self._t("backup.btn.clear_preview"), command=self._clear_preview)
+        self.btn_clear_preview.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self.btn_execute_restore = ttk.Button(self.frm_preview_buttons, text=self._t("backup.btn.execute_restore"), command=self._execute_restore)
+        self.btn_execute_restore.grid(row=0, column=1, sticky="ew")
 
-        log_frame = ttk.LabelFrame(parent, text="Log", padding=6)
-        log_frame.grid(row=5, column=0, sticky="nsew")
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
+        self.frm_log = ttk.LabelFrame(parent, text=self._t("backup.section.log"), padding=6)
+        self.frm_log.grid(row=5, column=0, sticky="nsew")
+        self.frm_log.columnconfigure(0, weight=1)
+        self.frm_log.rowconfigure(0, weight=1)
 
-        self.txt_log = ScrolledText(log_frame, height=8, wrap="word", state="normal")
+        self.txt_log = ScrolledText(self.frm_log, height=8, wrap="word", state="normal")
         self.txt_log.grid(row=0, column=0, sticky="nsew")
 
         parent.rowconfigure(3, weight=1)
         parent.rowconfigure(5, weight=1)
 
     def on_table_ready(self, table: str):
+        """Chuẩn bị lại dữ liệu xem trước khi bảng đích thay đổi."""
         if self._columns:
             self.preview_grid.configure_columns(self._columns)
         self.imported_rows.clear()
         self.preview_grid.clear()
-        self.lbl_file.config(text="Chưa chọn file")
+        self.lbl_file.config(text=self._t("backup.label.no_file"))
 
     def _import_csv(self):
+        """Đọc dữ liệu từ tệp CSV và hiển thị lên lưới xem trước."""
         table = self.var_selected_table.get().strip()
         if not table:
-            messagebox.showwarning("Tool VIP", "Vui lòng chọn bảng trước khi import.", parent=self)
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("backup.msg.no_target_table"), parent=self)
             return
         path = filedialog.askopenfilename(
-            title="Chọn file CSV",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title=self._t("backup.dialog.select_csv"),
+            filetypes=[
+                (self._t("backup.dialog.csv_files"), "*.csv"),
+                (self._t("backup.dialog.all_files"), "*.*"),
+            ],
             parent=self,
         )
         if not path:
@@ -516,24 +631,24 @@ class RestoreFromCSVWindow(BackupRestoreBase):
             with open(path, "r", encoding="utf-8-sig", newline="") as f:
                 reader = csv.DictReader(f)
                 if not reader.fieldnames:
-                    raise ValueError("Không tìm thấy header trong file.")
+                    raise ValueError(self._t("backup.msg.missing_header"))
                 headers = [h.strip() for h in reader.fieldnames]
                 rows = [row for row in reader]
         except Exception as exc:
-            messagebox.showerror("Tool VIP", f"Lỗi đọc CSV: {exc}", parent=self)
+            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.read_csv_error", error=str(exc)), parent=self)
             return
 
         table_cols = [col.upper() for col in self._columns]
         csv_cols = [h.upper() for h in headers]
         missing = [col for col in table_cols if col not in csv_cols]
         extra = [col for col in csv_cols if col not in table_cols]
-        if missing or extra:
-            parts = []
-            if missing:
-                parts.append("Thiếu cột: " + ", ".join(missing))
-            if extra:
-                parts.append("Dư cột: " + ", ".join(extra))
-            messagebox.showwarning("Tool VIP", "\n".join(parts), parent=self)
+        warnings = []
+        if missing:
+            warnings.append(self._t("backup.msg.missing_columns", columns=", ".join(missing)))
+        if extra:
+            warnings.append(self._t("backup.msg.extra_columns", columns=", ".join(extra)))
+        if warnings:
+            messagebox.showwarning(self._t(APP_TITLE_KEY), "\n".join(warnings), parent=self)
 
         self.lbl_file.config(text=path)
         self.preview_grid.configure_columns(self._columns)
@@ -550,25 +665,31 @@ class RestoreFromCSVWindow(BackupRestoreBase):
 
         self.imported_rows = formatted_rows
         self.csv_headers = headers
-        self._append_log(f"Đã import {len(formatted_rows)} dòng từ {path}")
+        self._append_log(self._t("backup.log.import_summary", count=len(formatted_rows), path=path))
 
     def _clear_preview(self):
+        """Xóa dữ liệu CSV đang xem trước."""
         self.imported_rows.clear()
         self.preview_grid.clear()
-        self.lbl_file.config(text="Chưa chọn file")
+        self.lbl_file.config(text=self._t("backup.label.no_file"))
 
     def _execute_restore(self):
+        """Restore dữ liệu CSV vào bảng đích."""
         table = self.var_selected_table.get().strip()
         if not table:
-            messagebox.showwarning("Tool VIP", "Chưa chọn bảng đích.", parent=self)
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("backup.msg.select_table"), parent=self)
             return
         if not self.imported_rows:
-            messagebox.showwarning("Tool VIP", "Chưa có dữ liệu để restore.", parent=self)
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("backup.msg.no_csv_data"), parent=self)
             return
         if not self.conn:
-            messagebox.showerror("Tool VIP", "Chưa kết nối database.", parent=self)
+            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.not_connected"), parent=self)
             return
-        if not messagebox.askyesno("Tool VIP", f"Restore {len(self.imported_rows)} dòng vào {table}?", parent=self):
+        if not messagebox.askyesno(
+            self._t(APP_TITLE_KEY),
+            self._t("backup.msg.restore_confirm", count=len(self.imported_rows), table=table),
+            parent=self,
+        ):
             return
 
         owner, name = self._split_table(table)
@@ -578,7 +699,7 @@ class RestoreFromCSVWindow(BackupRestoreBase):
         try:
             cur = self.conn.cursor()
         except Exception as exc:
-            messagebox.showerror("Tool VIP", f"Lỗi cursor: {exc}", parent=self)
+            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.cursor_error", error=str(exc)), parent=self)
             return
 
         try:
@@ -596,7 +717,7 @@ class RestoreFromCSVWindow(BackupRestoreBase):
         except Exception as exc:
             self.conn.rollback()
             self._append_log(f"ERROR: {exc}")
-            messagebox.showerror("Tool VIP", f"Lỗi restore: {exc}", parent=self)
+            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.restore_error", error=str(exc)), parent=self)
             return
         finally:
             try:
@@ -604,17 +725,38 @@ class RestoreFromCSVWindow(BackupRestoreBase):
             except Exception:
                 pass
 
-        self._append_log("Restore CSV hoàn thành.")
-        messagebox.showinfo("Tool VIP", "Restore CSV thành công.", parent=self)
+        self._append_log(self._t("backup.log.restore_done"))
+        messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("backup.msg.restore_success"), parent=self)
+
+    def _apply_language(self) -> None:
+        """Cập nhật chuỗi dịch cho các thành phần restore CSV."""
+        super()._apply_language()
+        if hasattr(self, "lbl_target"):
+            self.lbl_target.configure(text=self._t("backup.label.target_table"))
+        if hasattr(self, "frm_preview"):
+            self.frm_preview.configure(text=self._t("backup.section.preview"))
+        if hasattr(self, "frm_log"):
+            self.frm_log.configure(text=self._t("backup.section.log"))
+        if hasattr(self, "btn_import_csv"):
+            self.btn_import_csv.configure(text=self._t("backup.btn.import_csv"))
+        if hasattr(self, "btn_clear_preview"):
+            self.btn_clear_preview.configure(text=self._t("backup.btn.clear_preview"))
+        if hasattr(self, "btn_execute_restore"):
+            self.btn_execute_restore.configure(text=self._t("backup.btn.execute_restore"))
+        if hasattr(self, "lbl_file") and not self.imported_rows:
+            self.lbl_file.configure(text=self._t("backup.label.no_file"))
 
 
 def open_backup_window(parent: tk.Widget, connection: Dict[str, str]):
+    """Mở màn hình tạo backup."""
     BackupWindow(parent, connection)
 
 
 def open_restore_from_backup_window(parent: tk.Widget, connection: Dict[str, str]):
+    """Mở màn hình restore từ bảng backup."""
     RestoreFromBackupWindow(parent, connection)
 
 
 def open_restore_from_csv_window(parent: tk.Widget, connection: Dict[str, str]):
+    """Mở màn hình restore từ tệp CSV."""
     RestoreFromCSVWindow(parent, connection)

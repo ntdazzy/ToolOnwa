@@ -1,5 +1,5 @@
 """
-Update screen implementation.
+Màn hình Update hỗ trợ xem và cập nhật dữ liệu.
 """
 from __future__ import annotations
 
@@ -12,19 +12,24 @@ from typing import Dict, List, Optional
 
 from screen.DB import db_utils
 from screen.DB.widgets import ColumnOrderDialog, DataGrid, LoadingPopup
+from core import i18n
+
+APP_TITLE_KEY = "common.app_title"
 
 
 class UpdateWindow(tk.Toplevel):
     def __init__(self, parent: tk.Widget, connection: Dict[str, str]):
+        """Khởi tạo cửa sổ Update với dữ liệu kết nối đã chọn."""
         super().__init__(parent)
         self.parent = parent
         self.conn_info = connection
         self.conn = None
         self.current_owner = connection.get("user", "").upper()
-        self.title("Update")
+        self.title(self._t("update.title"))
         self.geometry("1180x760")
         self.minsize(960, 620)
         self.resizable(True, True)
+        self._set_icon()
 
         self._table_items: List[Dict[str, str]] = []
         self._table_view: List[Dict[str, str]] = []
@@ -34,98 +39,149 @@ class UpdateWindow(tk.Toplevel):
         self._pk_columns: List[str] = []
         self._cached_rows: List[Dict[str, str]] = []
         self._loader: Optional[LoadingPopup] = None
+        self._current_table_label: str = "..."
 
         self._build_ui()
+        self._lang_listener = self._handle_language_change
+        i18n.add_listener(self._lang_listener)
+        self._apply_language()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._connect_async)
 
     # ------------------------------------------------------------------
     def _build_ui(self):
-        main = ttk.Frame(self, padding=8)
-        main.pack(fill="both", expand=True)
-        main.rowconfigure(1, weight=1)
-        main.columnconfigure(0, weight=1)
+        """Xây dựng bố cục chính của màn hình Update."""
+        self.frm_main = ttk.Frame(self, padding=8)
+        self.frm_main.pack(fill="both", expand=True)
+        self.frm_main.rowconfigure(1, weight=1)
+        self.frm_main.columnconfigure(0, weight=1)
 
-        top = ttk.Frame(main)
-        top.grid(row=0, column=0, sticky="ew")
+        self.frm_top = ttk.Frame(self.frm_main)
+        self.frm_top.grid(row=0, column=0, sticky="ew")
         for idx in range(3):
-            top.columnconfigure(idx, weight=0)
-        top.columnconfigure(0, weight=1)
+            self.frm_top.columnconfigure(idx, weight=0)
+        self.frm_top.columnconfigure(0, weight=1)
 
-        self._build_search(top)
-        self._build_actions(top)
-        self._build_connection(top)
+        self._build_search(self.frm_top)
+        self._build_actions(self.frm_top)
+        self._build_connection(self.frm_top)
 
-        middle = ttk.Frame(main)
-        middle.grid(row=1, column=0, sticky="nsew", pady=(8, 6))
-        middle.rowconfigure(0, weight=1)
-        middle.columnconfigure(0, weight=1)
+        self.frm_middle = ttk.Frame(self.frm_main)
+        self.frm_middle.grid(row=1, column=0, sticky="nsew", pady=(8, 6))
+        self.frm_middle.rowconfigure(0, weight=1)
+        self.frm_middle.columnconfigure(0, weight=1)
 
-        self.grid = DataGrid(middle)
+        self.grid = DataGrid(self.frm_middle)
         self.grid.grid(row=0, column=0, sticky="nsew")
 
-        btn_bar = ttk.Frame(middle)
-        btn_bar.grid(row=1, column=0, sticky="e", pady=(6, 0))
-        ttk.Button(btn_bar, text="Import CSV", command=self.grid.import_csv_dialog).pack(side="left", padx=4)
-        ttk.Button(btn_bar, text="Export CSV", command=self.grid.export_csv_dialog).pack(side="left", padx=4)
-        ttk.Button(btn_bar, text="Thêm dòng trống", command=lambda: self.grid.append_dict({})).pack(side="left", padx=4)
+        self.btn_bar = ttk.Frame(self.frm_middle)
+        self.btn_bar.grid(row=1, column=0, sticky="e", pady=(6, 0))
+        self.btn_import_csv = ttk.Button(self.btn_bar, text=self._t("update.btn.import_csv"), command=self.grid.import_csv_dialog)
+        self.btn_import_csv.pack(side="left", padx=4)
+        self.btn_export_csv = ttk.Button(self.btn_bar, text=self._t("update.btn.export_csv"), command=self.grid.export_csv_dialog)
+        self.btn_export_csv.pack(side="left", padx=4)
+        self.btn_add_row = ttk.Button(self.btn_bar, text=self._t("update.btn.add_row"), command=lambda: self.grid.append_dict({}))
+        self.btn_add_row.pack(side="left", padx=4)
 
-        cond_frame = ttk.LabelFrame(main, text="Điều kiện UPDATE bổ sung (dùng {{COLUMN}} để lấy giá trị dòng)", padding=6)
-        cond_frame.grid(row=2, column=0, sticky="ew", pady=(0, 6))
-        cond_frame.columnconfigure(0, weight=1)
-        self.txt_condition = ScrolledText(cond_frame, height=3, wrap="word")
+        self.frm_condition = ttk.LabelFrame(
+            self.frm_main,
+            text=self._t("update.section.condition"),
+            padding=6,
+        )
+        self.frm_condition.grid(row=2, column=0, sticky="ew", pady=(0, 6))
+        self.frm_condition.columnconfigure(0, weight=1)
+        self.txt_condition = ScrolledText(self.frm_condition, height=3, wrap="word")
         self.txt_condition.grid(row=0, column=0, sticky="ew")
 
-        bottom = ttk.LabelFrame(main, text="Update ...", padding=6)
-        bottom.grid(row=3, column=0, sticky="nsew")
-        bottom.rowconfigure(0, weight=1)
-        bottom.columnconfigure(0, weight=1)
+        self.frm_sql = ttk.LabelFrame(
+            self.frm_main,
+            text=self._t("update.section.sql", table=self._current_table_label),
+            padding=6,
+        )
+        self.frm_sql.grid(row=3, column=0, sticky="nsew")
+        self.frm_sql.rowconfigure(0, weight=1)
+        self.frm_sql.columnconfigure(0, weight=1)
 
-        self.txt_sql = ScrolledText(bottom, height=8, wrap="word")
+        self.txt_sql = ScrolledText(self.frm_sql, height=8, wrap="word")
         self.txt_sql.grid(row=0, column=0, sticky="nsew")
 
     def _build_search(self, parent: ttk.Frame):
-        grp = ttk.LabelFrame(parent, text="Tìm kiếm", padding=6)
-        grp.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        grp.columnconfigure(0, weight=1)
-        ttk.Label(grp, text="Table Name").grid(row=0, column=0, sticky="w")
+        """Tạo khu vực tìm kiếm danh sách bảng."""
+        self.grp_search = ttk.LabelFrame(parent, text=self._t("update.section.search"), padding=6)
+        self.grp_search.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.grp_search.columnconfigure(0, weight=1)
+
+        self.lbl_table_name = ttk.Label(self.grp_search, text=self._t("update.label.table_name"))
+        self.lbl_table_name.grid(row=0, column=0, sticky="w")
+
         self.var_search = tk.StringVar()
-        ent = ttk.Entry(grp, textvariable=self.var_search)
-        ent.grid(row=1, column=0, sticky="ew", pady=4)
-        ent.bind("<KeyRelease>", lambda e: self._filter_tables())
-        self.list_tables = tk.Listbox(grp, height=10)
+        self.ent_search = ttk.Entry(self.grp_search, textvariable=self.var_search)
+        self.ent_search.grid(row=1, column=0, sticky="ew", pady=4)
+        self.ent_search.bind("<KeyRelease>", lambda _event: self._filter_tables())
+
+        self.list_tables = tk.Listbox(self.grp_search, height=10)
         self.list_tables.grid(row=2, column=0, sticky="nsew", pady=(0, 4))
-        self.list_tables.bind("<<ListboxSelect>>", lambda e: self._on_select_table())
-        grp.rowconfigure(2, weight=1)
+        self.list_tables.bind("<<ListboxSelect>>", lambda _event: self._on_select_table())
+        self.grp_search.rowconfigure(2, weight=1)
 
     def _build_actions(self, parent: ttk.Frame):
-        grp = ttk.LabelFrame(parent, text="Chức năng", padding=6)
-        grp.grid(row=0, column=1, sticky="n", padx=(0, 8))
-        ttk.Button(grp, text="Tạo câu Update", command=self._generate_sql).grid(row=0, column=0, sticky="ew", pady=4)
-        ttk.Button(grp, text="Copy", command=self._copy_sql).grid(row=1, column=0, sticky="ew", pady=4)
-        ttk.Button(grp, text="Thay đổi vị trí cột", command=self._change_column_order).grid(row=2, column=0, sticky="ew", pady=4)
-        ttk.Button(grp, text="Thực thi", command=self._execute).grid(row=3, column=0, sticky="ew", pady=4)
-        ttk.Button(grp, text="Clear", command=self._clear).grid(row=4, column=0, sticky="ew", pady=4)
+        """Khởi tạo các nút thao tác chính."""
+        self.grp_actions = ttk.LabelFrame(parent, text=self._t("update.section.actions"), padding=6)
+        self.grp_actions.grid(row=0, column=1, sticky="n", padx=(0, 8))
+
+        self.btn_build_sql = ttk.Button(self.grp_actions, text=self._t("update.btn.build_sql"), command=self._generate_sql)
+        self.btn_build_sql.grid(row=0, column=0, sticky="ew", pady=4)
+
+        self.btn_copy = ttk.Button(self.grp_actions, text=self._t("common.copy"), command=self._copy_sql)
+        self.btn_copy.grid(row=1, column=0, sticky="ew", pady=4)
+
+        self.btn_reorder = ttk.Button(self.grp_actions, text=self._t("update.btn.reorder"), command=self._change_column_order)
+        self.btn_reorder.grid(row=2, column=0, sticky="ew", pady=4)
+
+        self.btn_execute = ttk.Button(self.grp_actions, text=self._t("update.btn.execute"), command=self._execute)
+        self.btn_execute.grid(row=3, column=0, sticky="ew", pady=4)
+
+        self.btn_clear = ttk.Button(self.grp_actions, text=self._t("update.btn.clear"), command=self._clear)
+        self.btn_clear.grid(row=4, column=0, sticky="ew", pady=4)
 
     def _build_connection(self, parent: ttk.Frame):
-        grp = ttk.LabelFrame(parent, text="Thông Tin Kết Nối", padding=6, width=240)
-        grp.grid(row=0, column=2, sticky="n")
-        labels = {
-            "User ID": self.conn_info.get("user", ""),
-            "Data Source": self.conn_info.get("alias", ""),
-            "Host": self.conn_info.get("host", ""),
-            "Port": self.conn_info.get("port", ""),
-        }
-        for idx, (label, value) in enumerate(labels.items()):
-            ttk.Label(grp, text=label).grid(row=idx, column=0, sticky="w", pady=2)
-            ent = ttk.Entry(grp)
-            ent.insert(0, value)
-            ent.configure(state="readonly")
-            ent.grid(row=idx, column=1, sticky="ew", pady=2, padx=(6, 0))
-        grp.columnconfigure(1, weight=1)
+        """Hiển thị thông tin kết nối đang sử dụng."""
+        self.grp_connection = ttk.LabelFrame(parent, text=self._t("update.section.connection"), padding=6, width=240)
+        self.grp_connection.grid(row=0, column=2, sticky="n")
+
+        self.lbl_conn_user = ttk.Label(self.grp_connection, text=self._t("main.label.user_id"))
+        self.lbl_conn_user.grid(row=0, column=0, sticky="w", pady=2)
+        self.ent_conn_user = ttk.Entry(self.grp_connection)
+        self.ent_conn_user.insert(0, self.conn_info.get("user", ""))
+        self.ent_conn_user.configure(state="readonly")
+        self.ent_conn_user.grid(row=0, column=1, sticky="ew", pady=2, padx=(6, 0))
+
+        self.lbl_conn_alias = ttk.Label(self.grp_connection, text=self._t("main.label.data_source"))
+        self.lbl_conn_alias.grid(row=1, column=0, sticky="w", pady=2)
+        self.ent_conn_alias = ttk.Entry(self.grp_connection)
+        self.ent_conn_alias.insert(0, self.conn_info.get("alias", ""))
+        self.ent_conn_alias.configure(state="readonly")
+        self.ent_conn_alias.grid(row=1, column=1, sticky="ew", pady=2, padx=(6, 0))
+
+        self.lbl_conn_host = ttk.Label(self.grp_connection, text=self._t("update.label.host"))
+        self.lbl_conn_host.grid(row=2, column=0, sticky="w", pady=2)
+        self.ent_conn_host = ttk.Entry(self.grp_connection)
+        self.ent_conn_host.insert(0, self.conn_info.get("host", ""))
+        self.ent_conn_host.configure(state="readonly")
+        self.ent_conn_host.grid(row=2, column=1, sticky="ew", pady=2, padx=(6, 0))
+
+        self.lbl_conn_port = ttk.Label(self.grp_connection, text=self._t("update.label.port"))
+        self.lbl_conn_port.grid(row=3, column=0, sticky="w", pady=2)
+        self.ent_conn_port = ttk.Entry(self.grp_connection)
+        self.ent_conn_port.insert(0, self.conn_info.get("port", ""))
+        self.ent_conn_port.configure(state="readonly")
+        self.ent_conn_port.grid(row=3, column=1, sticky="ew", pady=2, padx=(6, 0))
+
+        self.grp_connection.columnconfigure(1, weight=1)
 
     # ------------------------------------------------------------------
     def _connect_async(self):
+        """Kết nối cơ sở dữ liệu ở luồng nền và tải danh sách bảng."""
         def worker():
             try:
                 self.conn = db_utils.connect_oracle(
@@ -142,20 +198,22 @@ class UpdateWindow(tk.Toplevel):
                 self.after(0, lambda m=msg: self._show_error(m))
                 return
             except Exception as exc:
-                msg = f"Lỗi kết nối: {exc}"
+                msg = self._t("common.msg.connection_error", error=str(exc))
                 self.after(0, lambda m=msg: self._show_error(m))
                 return
             self.after(0, lambda: self._init_tables(tables))
 
-        self._show_loading("Đang tải danh sách bảng...")
+        self._show_loading(self._t("common.loading_tables"))
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_error(self, msg: str):
+        """Hiển thị lỗi và đóng cửa sổ khi không thể khởi tạo."""
         self._hide_loading()
-        messagebox.showerror("Tool VIP", msg, parent=self)
+        messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
         self.destroy()
 
     def _init_tables(self, tables: List[str]):
+        """Tải danh sách bảng truy cập được vào listbox."""
         self._hide_loading()
         items: List[Dict[str, str]] = []
         for raw in tables:
@@ -173,9 +231,12 @@ class UpdateWindow(tk.Toplevel):
             self._on_select_table()
         else:
             self._active_table = None
+            self._current_table_label = "..."
+            self._set_sql_label("...")
 
     # ------------------------------------------------------------------
     def _filter_tables(self):
+        """Lọc danh sách bảng theo từ khóa đang nhập."""
         keyword = self.var_search.get().strip().upper()
         current_full = self._active_table["full"] if self._active_table else None
         if keyword:
@@ -199,8 +260,11 @@ class UpdateWindow(tk.Toplevel):
             self.grid.clear()
             self.txt_sql.delete("1.0", tk.END)
             self.txt_condition.delete("1.0", tk.END)
+            self._current_table_label = "..."
+            self._set_sql_label("...")
 
     def _on_select_table(self, _event=None):
+        """Xử lý khi chọn bảng mới trong danh sách."""
         selection = self.list_tables.curselection()
         if not selection:
             return
@@ -214,13 +278,14 @@ class UpdateWindow(tk.Toplevel):
         self._load_table_metadata(item)
 
     def _load_table_metadata(self, item: Dict[str, str]):
+        """Nạp thông tin cột và khóa chính của bảng đang chọn."""
         if not self.conn:
             return
         try:
             columns = db_utils.fetch_table_columns(self.conn, item["full"], self.current_owner)
             pk_cols = db_utils.fetch_primary_keys(self.conn, item["full"], self.current_owner)
         except Exception as exc:
-            messagebox.showerror("Tool VIP", f"Lỗi đọc metadata: {exc}", parent=self)
+            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("update.msg.metadata_error", error=str(exc)), parent=self)
             return
         self._columns = [col["column_name"] for col in columns]
         self._column_meta = {col["column_name"]: col for col in columns}
@@ -232,25 +297,28 @@ class UpdateWindow(tk.Toplevel):
         self._set_sql_label(item["display"])
 
     def _set_sql_label(self, table_display: str):
-        frame: ttk.LabelFrame = self.txt_sql.master  # type: ignore[assignment]
-        frame.configure(text=f"Update {table_display}")
+        """Cập nhật tiêu đề khung SQL theo tên bảng hiện tại."""
+        self._current_table_label = table_display or "..."
+        if hasattr(self, "frm_sql"):
+            self.frm_sql.configure(text=self._t("update.section.sql", table=self._current_table_label))
 
     # ------------------------------------------------------------------
     def _generate_sql(self):
+        """Sinh câu lệnh UPDATE dựa trên dữ liệu trong lưới."""
         rows = self.grid.get_all()
         if not rows:
-            messagebox.showwarning("Tool VIP", "Không có dữ liệu để tạo update.", parent=self)
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("update.msg.no_data_generate"), parent=self)
             return
         if not self._columns:
-            messagebox.showwarning("Tool VIP", "Chưa chọn bảng.", parent=self)
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("update.msg.no_table"), parent=self)
             return
         table = self._current_table()
         if not table:
-            messagebox.showwarning("Tool VIP", "Chưa chọn bảng.", parent=self)
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("update.msg.no_table"), parent=self)
             return
         set_columns = [col for col in self._columns if col not in self._pk_columns]
         if not set_columns:
-            messagebox.showwarning("Tool VIP", "Không có cột nào để update.", parent=self)
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("update.msg.no_columns_update"), parent=self)
             return
         condition_template = self._condition_template()
         owner, table_name = self._split_table(table)
@@ -279,16 +347,18 @@ class UpdateWindow(tk.Toplevel):
         self.txt_sql.insert(tk.END, "\n".join(sql_lines))
 
     def _copy_sql(self):
+        """Copy câu SQL đang hiển thị vào clipboard."""
         data = self.txt_sql.get("1.0", tk.END).strip()
         if not data:
             return
         self.clipboard_clear()
         self.clipboard_append(data)
-        messagebox.showinfo("Tool VIP", "Đã copy câu update.", parent=self)
+        messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("update.msg.copy_done"), parent=self)
 
     def _change_column_order(self):
+        """Thay đổi thứ tự cột hiển thị trên lưới."""
         if not self._columns:
-            messagebox.showwarning("Tool VIP", "Chưa có cột để thay đổi.", parent=self)
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("update.msg.no_columns_update"), parent=self)
             return
         current_rows = self.grid.get_all()
         dlg = ColumnOrderDialog(self, self._columns)
@@ -301,7 +371,8 @@ class UpdateWindow(tk.Toplevel):
                 self.grid.append_dict(row)
 
     def _clear(self):
-        if not messagebox.askyesno("Tool VIP", "Bạn có muốn reset dữ liệu không?", parent=self):
+        """Xóa dữ liệu trên lưới và vùng SQL."""
+        if not messagebox.askyesno(self._t(APP_TITLE_KEY), self._t("update.msg.clear_confirm"), parent=self):
             return
         self.grid.clear()
         self.grid.append_dict({})
@@ -310,22 +381,23 @@ class UpdateWindow(tk.Toplevel):
         self._cached_rows.clear()
 
     def _execute(self):
+        """Thực thi câu UPDATE trực tiếp lên cơ sở dữ liệu."""
         table = self._current_table()
         if not table:
-            messagebox.showwarning("Tool VIP", "Chưa chọn bảng.", parent=self)
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("update.msg.no_table"), parent=self)
             return
         rows = self.grid.get_all()
         if not rows:
-            messagebox.showwarning("Tool VIP", "Không có dữ liệu để update.", parent=self)
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("update.msg.no_data_execute"), parent=self)
             return
         if not self.conn:
-            messagebox.showerror("Tool VIP", "Chưa kết nối database.", parent=self)
+            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("update.msg.not_connected"), parent=self)
             return
-        if not messagebox.askyesno("Tool VIP", "Thực thi update?", parent=self):
+        if not messagebox.askyesno(self._t(APP_TITLE_KEY), self._t("update.msg.confirm_execute"), parent=self):
             return
         set_columns = [col for col in self._columns if col not in self._pk_columns]
         if not set_columns:
-            messagebox.showwarning("Tool VIP", "Không có cột nào để update.", parent=self)
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("update.msg.no_columns_update"), parent=self)
             return
         condition_template = self._condition_template()
         owner, table_name = self._split_table(table)
@@ -333,14 +405,14 @@ class UpdateWindow(tk.Toplevel):
         try:
             cur = self.conn.cursor()
         except Exception as exc:
-            messagebox.showerror("Tool VIP", f"Lỗi cursor: {exc}", parent=self)
+            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("update.msg.cursor_error", error=str(exc)), parent=self)
             return
 
         try:
             for row in rows:
                 set_clause = ", ".join(f"{col} = :{col}" for col in set_columns)
                 if not self._pk_columns and not condition_template:
-                    raise ValueError("Thiếu điều kiện WHERE. Bảng không có khóa chính, cần nhập điều kiện.")
+                    raise ValueError(self._t("update.msg.where_missing_no_pk"))
                 where_parts = []
                 binds = {}
                 for col in set_columns:
@@ -348,7 +420,7 @@ class UpdateWindow(tk.Toplevel):
                 for pk in self._pk_columns:
                     value = row.get(pk)
                     if value in (None, ""):
-                        raise ValueError(f"Khóa chính {pk} bị trống.")
+                        raise ValueError(self._t("update.msg.pk_missing", column=pk))
                     binds[f"PK_{pk}"] = self._convert_value(value, self._column_meta.get(pk))
                     where_parts.append(f"{pk} = :PK_{pk}")
                 extra = self._render_condition(condition_template, row)
@@ -359,26 +431,28 @@ class UpdateWindow(tk.Toplevel):
                         sql += " AND (" + extra + ")"
                 else:
                     if not extra:
-                        raise ValueError("Thiếu điều kiện WHERE.")
+                        raise ValueError(self._t("update.msg.where_missing"))
                     sql += " WHERE " + extra
                 cur.execute(sql, binds)
             self.conn.commit()
         except Exception as exc:
             self.conn.rollback()
-            messagebox.showerror("Tool VIP", f"Lỗi update: {exc}", parent=self)
+            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("update.msg.update_error", error=str(exc)), parent=self)
             return
         finally:
             try:
                 cur.close()
             except Exception:
                 pass
-        messagebox.showinfo("Tool VIP", "Update thành công.", parent=self)
+        messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("update.msg.update_success"), parent=self)
 
     # ------------------------------------------------------------------
     def _condition_template(self) -> str:
+        """Lấy mẫu điều kiện bổ sung người dùng nhập vào."""
         return self.txt_condition.get("1.0", tk.END).strip()
 
     def _render_condition(self, template: str, row: Dict[str, str]) -> str:
+        """Thay thế placeholder trong điều kiện bổ sung bằng giá trị thực tế."""
         if not template:
             return ""
 
@@ -392,6 +466,7 @@ class UpdateWindow(tk.Toplevel):
         return rendered
 
     def _convert_value(self, value, meta):
+        """Chuyển đổi giá trị theo metadata để bind tham số chính xác."""
         if value in (None, ""):
             return None
         data_type = (meta or {}).get("data_type", "").upper() if meta else ""
@@ -404,14 +479,17 @@ class UpdateWindow(tk.Toplevel):
 
     # ------------------------------------------------------------------
     def _split_table(self, raw: str) -> tuple[str, str]:
+        """Tách owner và tên bảng, mặc định owner hiện tại nếu thiếu."""
         return db_utils.split_owner_table(raw, self.current_owner)
 
     def _current_table(self) -> Optional[str]:
+        """Trả về tên bảng đầy đủ đang được chọn."""
         if not self._active_table:
             return None
         return self._active_table["full"]
 
     def _on_close(self):
+        """Đóng cửa sổ và giải phóng kết nối."""
         self._hide_loading()
         try:
             if self.conn:
@@ -421,16 +499,80 @@ class UpdateWindow(tk.Toplevel):
         self.destroy()
 
     def _show_loading(self, message: str):
+        """Hiển thị popup tiến trình với thông điệp nhất định."""
         if self._loader:
             return
         self._loader = LoadingPopup(self, message)
 
     def _hide_loading(self):
+        """Đóng popup tiến trình khi hoàn tất."""
         if not self._loader:
             return
         self._loader.close()
         self._loader = None
 
+    def destroy(self):
+        """Hủy cửa sổ và gỡ listener ngôn ngữ."""
+        if hasattr(self, "_lang_listener"):
+            i18n.remove_listener(self._lang_listener)
+        super().destroy()
+
+    def _handle_language_change(self, _lang: str) -> None:
+        """Cập nhật giao diện khi đổi ngôn ngữ."""
+        self._apply_language()
+
+    def _apply_language(self) -> None:
+        """Áp dụng chuỗi đa ngôn ngữ cho toàn bộ widget."""
+        self.title(self._t("update.title"))
+        if hasattr(self, "grp_search"):
+            self.grp_search.configure(text=self._t("update.section.search"))
+        if hasattr(self, "lbl_table_name"):
+            self.lbl_table_name.configure(text=self._t("update.label.table_name"))
+        if hasattr(self, "grp_actions"):
+            self.grp_actions.configure(text=self._t("update.section.actions"))
+        if hasattr(self, "btn_build_sql"):
+            self.btn_build_sql.configure(text=self._t("update.btn.build_sql"))
+        if hasattr(self, "btn_copy"):
+            self.btn_copy.configure(text=self._t("common.copy"))
+        if hasattr(self, "btn_reorder"):
+            self.btn_reorder.configure(text=self._t("update.btn.reorder"))
+        if hasattr(self, "btn_execute"):
+            self.btn_execute.configure(text=self._t("update.btn.execute"))
+        if hasattr(self, "btn_clear"):
+            self.btn_clear.configure(text=self._t("update.btn.clear"))
+        if hasattr(self, "btn_import_csv"):
+            self.btn_import_csv.configure(text=self._t("update.btn.import_csv"))
+        if hasattr(self, "btn_export_csv"):
+            self.btn_export_csv.configure(text=self._t("update.btn.export_csv"))
+        if hasattr(self, "btn_add_row"):
+            self.btn_add_row.configure(text=self._t("update.btn.add_row"))
+        if hasattr(self, "grp_connection"):
+            self.grp_connection.configure(text=self._t("update.section.connection"))
+        if hasattr(self, "lbl_conn_user"):
+            self.lbl_conn_user.configure(text=self._t("main.label.user_id"))
+        if hasattr(self, "lbl_conn_alias"):
+            self.lbl_conn_alias.configure(text=self._t("main.label.data_source"))
+        if hasattr(self, "lbl_conn_host"):
+            self.lbl_conn_host.configure(text=self._t("update.label.host"))
+        if hasattr(self, "lbl_conn_port"):
+            self.lbl_conn_port.configure(text=self._t("update.label.port"))
+        if hasattr(self, "frm_condition"):
+            self.frm_condition.configure(text=self._t("update.section.condition"))
+        if hasattr(self, "frm_sql"):
+            self.frm_sql.configure(text=self._t("update.section.sql", table=self._current_table_label))
+
+    def _t(self, key: str, **kwargs) -> str:
+        """Truy xuất chuỗi theo ngôn ngữ hiện tại."""
+        return i18n.translate(key, **kwargs)
+
+    def _set_icon(self) -> None:
+        """Áp dụng biểu tượng ứng dụng nếu có."""
+        try:
+            self.iconbitmap("icons/logo.ico")
+        except Exception:
+            pass
+
 
 def open_update_window(parent: tk.Widget, connection: Dict[str, str]):
+    """Mở cửa sổ Update."""
     UpdateWindow(parent, connection)
