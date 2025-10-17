@@ -249,6 +249,7 @@ class LogViewerApp:
     """Lớp điều khiển giao diện xem và phân tích log MU."""
 
     def __init__(self, root: tk.Misc, icon_path: Optional[str] = None) -> None:
+        """Khởi tạo giao diện chính và trạng thái ban đầu của log viewer."""
         self.root = root
         self.icon_path = icon_path or (DEFAULT_ICON_PATH if os.path.isfile(DEFAULT_ICON_PATH) else None)
         self._apply_icon(self.root)

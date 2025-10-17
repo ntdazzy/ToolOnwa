@@ -12,9 +12,12 @@ from typing import Dict, List, Optional
 
 from screen.DB import db_utils
 from screen.DB.widgets import ColumnOrderDialog, DataGrid, LoadingPopup
-from core import i18n
+from screen.DB.template_dialog import TemplateLibraryDialog, TemplateSaveDialog
+from core import history, i18n, templates
 
 APP_TITLE_KEY = "common.app_title"
+
+ACTIVE_WINDOWS: List["UpdateWindow"] = []
 
 
 class UpdateWindow(tk.Toplevel):
@@ -38,8 +41,12 @@ class UpdateWindow(tk.Toplevel):
         self._column_meta: Dict[str, dict] = {}
         self._pk_columns: List[str] = []
         self._cached_rows: List[Dict[str, str]] = []
+        self._draft_history_id: Optional[int] = None
+        self._draft_history_sql: str = ""
         self._loader: Optional[LoadingPopup] = None
         self._current_table_label: str = "..."
+
+        ACTIVE_WINDOWS.append(self)
 
         self._build_ui()
         self._lang_listener = self._handle_language_change
@@ -125,24 +132,31 @@ class UpdateWindow(tk.Toplevel):
         self.grp_search.rowconfigure(2, weight=1)
 
     def _build_actions(self, parent: ttk.Frame):
-        """Khởi tạo các nút thao tác chính."""
+        """Khoi tao cac nut thao tac chinh."""
         self.grp_actions = ttk.LabelFrame(parent, text=self._t("update.section.actions"), padding=6)
         self.grp_actions.grid(row=0, column=1, sticky="n", padx=(0, 8))
 
         self.btn_build_sql = ttk.Button(self.grp_actions, text=self._t("update.btn.build_sql"), command=self._generate_sql)
         self.btn_build_sql.grid(row=0, column=0, sticky="ew", pady=4)
 
+        self.btn_save_template = ttk.Button(self.grp_actions, text=self._t("update.btn.save_template"), command=self._save_template)
+        self.btn_save_template.grid(row=1, column=0, sticky="ew", pady=4)
+
+        self.btn_select_template = ttk.Button(self.grp_actions, text=self._t("update.btn.select_template"), command=self._open_template_library)
+        self.btn_select_template.grid(row=2, column=0, sticky="ew", pady=4)
+
         self.btn_copy = ttk.Button(self.grp_actions, text=self._t("common.copy"), command=self._copy_sql)
-        self.btn_copy.grid(row=1, column=0, sticky="ew", pady=4)
+        self.btn_copy.grid(row=3, column=0, sticky="ew", pady=4)
 
         self.btn_reorder = ttk.Button(self.grp_actions, text=self._t("update.btn.reorder"), command=self._change_column_order)
-        self.btn_reorder.grid(row=2, column=0, sticky="ew", pady=4)
+        self.btn_reorder.grid(row=4, column=0, sticky="ew", pady=4)
 
         self.btn_execute = ttk.Button(self.grp_actions, text=self._t("update.btn.execute"), command=self._execute)
-        self.btn_execute.grid(row=3, column=0, sticky="ew", pady=4)
+        self.btn_execute.grid(row=5, column=0, sticky="ew", pady=4)
 
         self.btn_clear = ttk.Button(self.grp_actions, text=self._t("update.btn.clear"), command=self._clear)
-        self.btn_clear.grid(row=4, column=0, sticky="ew", pady=4)
+        self.btn_clear.grid(row=6, column=0, sticky="ew", pady=4)
+
 
     def _build_connection(self, parent: ttk.Frame):
         """Hiển thị thông tin kết nối đang sử dụng."""
@@ -343,8 +357,30 @@ class UpdateWindow(tk.Toplevel):
             elif extra:
                 sql += " WHERE " + extra
             sql_lines.append(sql + ";")
+        sql_text = "\n".join(sql_lines)
         self.txt_sql.delete("1.0", tk.END)
-        self.txt_sql.insert(tk.END, "\n".join(sql_lines))
+        self.txt_sql.insert(tk.END, sql_text)
+        self._record_history_draft(table, sql_text, len(rows))
+
+    def _record_history_draft(self, table: str, sql_text: str, row_count: int) -> None:
+        """Ghi log du thao SQL update."""
+        trimmed = (sql_text or "").strip()
+        self._draft_history_sql = trimmed
+        if not trimmed:
+            self._draft_history_id = None
+            return
+        try:
+            action_id = history.log_action(
+                "update_sql",
+                table or "",
+                row_count,
+                "draft",
+                message=(f"Draft update for {table}" if table else "Draft update SQL"),
+                sql_text=trimmed,
+            )
+            self._draft_history_id = action_id
+        except Exception:
+            self._draft_history_id = None
 
     def _copy_sql(self):
         """Copy câu SQL đang hiển thị vào clipboard."""
@@ -354,6 +390,41 @@ class UpdateWindow(tk.Toplevel):
         self.clipboard_clear()
         self.clipboard_append(data)
         messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("update.msg.copy_done"), parent=self)
+
+    def _save_template(self):
+        """Luu cau SQL update hien tai vao thu vien template."""
+        sql_text = self.txt_sql.get("1.0", tk.END).strip()
+        if not sql_text:
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("template.save.message_no_sql"), parent=self)
+            return
+        default_name = self._current_table() or self._current_table_label or "UPDATE_SQL"
+        dlg = TemplateSaveDialog(self, default_type="update", default_name=default_name)
+        self.wait_window(dlg)
+        data = getattr(dlg, "result", None)
+        if not data:
+            return
+        tpl = templates.add_template(data["name"], data["type"], sql_text, data.get("description", ""))
+        if tpl:
+            messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("template.save.message_saved"), parent=self)
+        else:
+            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("common.error"), parent=self)
+
+    def _open_template_library(self):
+        """Mo thu vien template update."""
+        dlg = TemplateLibraryDialog(self, template_type="update")
+        self.wait_window(dlg)
+        record = getattr(dlg, "result", None)
+        if record and record.get("content"):
+            self.set_sql_text(record["content"])
+
+    def set_sql_text(self, sql_text: str) -> None:
+        """Cap nhat noi dung SQL va dua cua so len truoc."""
+        self.txt_sql.delete("1.0", tk.END)
+        self.txt_sql.insert(tk.END, sql_text)
+        self._draft_history_sql = (sql_text or "").strip()
+        self._draft_history_id = None
+        self.lift()
+        self.focus_force()
 
     def _change_column_order(self):
         """Thay đổi thứ tự cột hiển thị trên lưới."""
@@ -379,9 +450,11 @@ class UpdateWindow(tk.Toplevel):
         self.txt_sql.delete("1.0", tk.END)
         self.txt_condition.delete("1.0", tk.END)
         self._cached_rows.clear()
+        self._draft_history_id = None
+        self._draft_history_sql = ""
 
     def _execute(self):
-        """Thực thi câu UPDATE trực tiếp lên cơ sở dữ liệu."""
+        """Thuc thi cau UPDATE truoc tiep len co so du lieu."""
         table = self._current_table()
         if not table:
             messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("update.msg.no_table"), parent=self)
@@ -391,7 +464,9 @@ class UpdateWindow(tk.Toplevel):
             messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("update.msg.no_data_execute"), parent=self)
             return
         if not self.conn:
-            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("update.msg.not_connected"), parent=self)
+            msg = self._t("update.msg.not_connected")
+            self._log_history_status("failed", msg, len(rows), self.txt_sql.get("1.0", tk.END).strip(), table)
+            messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return
         if not messagebox.askyesno(self._t(APP_TITLE_KEY), self._t("update.msg.confirm_execute"), parent=self):
             return
@@ -399,13 +474,17 @@ class UpdateWindow(tk.Toplevel):
         if not set_columns:
             messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("update.msg.no_columns_update"), parent=self)
             return
+        row_count = len(rows)
+        sql_text_trim = (self.txt_sql.get("1.0", tk.END) or "").strip()
         condition_template = self._condition_template()
         owner, table_name = self._split_table(table)
 
         try:
             cur = self.conn.cursor()
         except Exception as exc:
-            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("update.msg.cursor_error", error=str(exc)), parent=self)
+            msg = self._t("update.msg.cursor_error", error=str(exc))
+            self._log_history_status("failed", msg, row_count, sql_text_trim, table)
+            messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return
 
         try:
@@ -437,16 +516,18 @@ class UpdateWindow(tk.Toplevel):
             self.conn.commit()
         except Exception as exc:
             self.conn.rollback()
-            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("update.msg.update_error", error=str(exc)), parent=self)
+            msg = self._t("update.msg.update_error", error=str(exc))
+            self._log_history_status("failed", msg, row_count, sql_text_trim, table)
+            messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return
         finally:
             try:
                 cur.close()
             except Exception:
                 pass
+        self._log_history_status("success", self._t("update.msg.update_success"), row_count, sql_text_trim, table)
         messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("update.msg.update_success"), parent=self)
 
-    # ------------------------------------------------------------------
     def _condition_template(self) -> str:
         """Lấy mẫu điều kiện bổ sung người dùng nhập vào."""
         return self.txt_condition.get("1.0", tk.END).strip()
@@ -498,6 +579,46 @@ class UpdateWindow(tk.Toplevel):
             pass
         self.destroy()
 
+    def _log_history_status(self, status: str, message: str, row_count: int, sql_text: str, table: Optional[str]) -> None:
+        """Cap nhat lich su update voi trang thai chon."""
+        trimmed = (sql_text or "").strip()
+        base_trim = (self._draft_history_sql or "").strip()
+        if not trimmed and base_trim:
+            trimmed = base_trim
+            sql_text = base_trim
+        try:
+            if self._draft_history_id and trimmed and base_trim and trimmed == base_trim:
+                updated = history.mark_action_status(
+                    self._draft_history_id,
+                    status,
+                    message,
+                    row_count=row_count,
+                    sql_text=sql_text,
+                )
+                if not updated:
+                    history.log_action(
+                        "update_execute",
+                        table or "",
+                        row_count,
+                        status,
+                        message=message,
+                        sql_text=sql_text,
+                    )
+            else:
+                history.log_action(
+                    "update_execute",
+                    table or "",
+                    row_count,
+                    status,
+                    message=message,
+                    sql_text=sql_text,
+                )
+        except Exception:
+            pass
+        finally:
+            if status in {"success", "failed"}:
+                self._draft_history_id = None
+
     def _show_loading(self, message: str):
         """Hiển thị popup tiến trình với thông điệp nhất định."""
         if self._loader:
@@ -532,6 +653,10 @@ class UpdateWindow(tk.Toplevel):
             self.grp_actions.configure(text=self._t("update.section.actions"))
         if hasattr(self, "btn_build_sql"):
             self.btn_build_sql.configure(text=self._t("update.btn.build_sql"))
+        if hasattr(self, "btn_save_template"):
+            self.btn_save_template.configure(text=self._t("update.btn.save_template"))
+        if hasattr(self, "btn_select_template"):
+            self.btn_select_template.configure(text=self._t("update.btn.select_template"))
         if hasattr(self, "btn_copy"):
             self.btn_copy.configure(text=self._t("common.copy"))
         if hasattr(self, "btn_reorder"):
@@ -576,3 +701,8 @@ class UpdateWindow(tk.Toplevel):
 def open_update_window(parent: tk.Widget, connection: Dict[str, str]):
     """Mở cửa sổ Update."""
     UpdateWindow(parent, connection)
+
+
+def get_active_windows() -> List["UpdateWindow"]:
+    """Tra ve danh sach cua so Update dang mo."""
+    return [win for win in ACTIVE_WINDOWS if win.winfo_exists()]

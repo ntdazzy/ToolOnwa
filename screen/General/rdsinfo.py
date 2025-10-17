@@ -50,6 +50,7 @@ class AddDialog(simpledialog.Dialog):
     """Dialog thêm/sửa cấu hình RDS."""
 
     def __init__(self, parent: tk.Misc, initial: Optional[Dict[str, str]] = None):
+        """Khởi tạo dialog với dữ liệu ban đầu nếu có."""
         self.initial = initial or {}
         super().__init__(parent, title=i18n.translate("rds.btn.edit" if initial else "rds.btn.add"))
 
@@ -106,6 +107,7 @@ class HostDetailWindow(tk.Toplevel):
         data: Dict[str, str],
         on_edit: Callable[[Dict[str, str]], None],
     ):
+        """Tạo cửa sổ chi tiết cho bản ghi RDS cụ thể."""
         super().__init__(parent)
         self.data = data
         self._on_edit = on_edit
@@ -114,13 +116,14 @@ class HostDetailWindow(tk.Toplevel):
         i18n.add_listener(self._lang_listener)
 
         self.title(i18n.translate("rds.detail.title"))
-        self.geometry("360x220")
+        self.geometry("410x250")
         self.resizable(False, False)
         self._set_icon()
 
         container = ttk.Frame(self, padding=10)
         container.pack(fill="both", expand=True)
-        container.columnconfigure(1, weight=1)
+        container.columnconfigure(0, weight=1, minsize=140)
+        container.columnconfigure(1, weight=1, minsize=160)
 
         self.lbl_display = ttk.Label(container)
         self.lbl_host = ttk.Label(container)
@@ -148,17 +151,18 @@ class HostDetailWindow(tk.Toplevel):
 
         btn_frame = ttk.Frame(container)
         btn_frame.grid(row=5, column=0, columnspan=2, pady=(10, 0), sticky="ew")
-        btn_frame.columnconfigure((0, 1, 2), weight=1)
+        for col in range(3):
+            btn_frame.columnconfigure(col, weight=1, minsize=110)
 
-        self.btn_copy_host = ttk.Button(btn_frame, command=lambda: self._copy_to_clipboard("host"))
-        self.btn_copy_user = ttk.Button(btn_frame, command=lambda: self._copy_to_clipboard("user"))
-        self.btn_copy_pass = ttk.Button(btn_frame, command=lambda: self._copy_to_clipboard("pass"))
-        self.btn_edit = ttk.Button(btn_frame, command=self._edit)
+        self.btn_copy_host = ttk.Button(btn_frame, command=lambda: self._copy_to_clipboard("host"), width=14)
+        self.btn_copy_user = ttk.Button(btn_frame, command=lambda: self._copy_to_clipboard("user"), width=14)
+        self.btn_copy_pass = ttk.Button(btn_frame, command=lambda: self._copy_to_clipboard("pass"), width=14)
+        self.btn_edit = ttk.Button(btn_frame, command=self._edit, width=18)
 
-        self.btn_copy_host.grid(row=0, column=0, padx=4, sticky="ew")
-        self.btn_copy_user.grid(row=0, column=1, padx=4, sticky="ew")
-        self.btn_copy_pass.grid(row=0, column=2, padx=4, sticky="ew")
-        self.btn_edit.grid(row=1, column=0, columnspan=3, pady=(8, 0), sticky="ew")
+        self.btn_copy_host.grid(row=0, column=0, padx=4, pady=2, sticky="ew")
+        self.btn_copy_user.grid(row=0, column=1, padx=4, pady=2, sticky="ew")
+        self.btn_copy_pass.grid(row=0, column=2, padx=4, pady=2, sticky="ew")
+        self.btn_edit.grid(row=1, column=0, columnspan=3, pady=(10, 0), padx=4, sticky="ew")
 
         self._apply_language()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -234,10 +238,11 @@ class RDSInfoWindow(tk.Toplevel):
     """Cửa sổ chính hiển thị danh sách subsystem và host RDS."""
 
     def __init__(self, parent: Optional[tk.Misc] = None):
+        """Khởi tạo cửa sổ quản lý RDS với dữ liệu hiện có."""
         super().__init__(parent)
         self.title(i18n.translate("rds.title"))
-        self.geometry("320x360")
-        self.minsize(320, 320)
+        self.geometry("420x360")
+        self.minsize(420, 360)
         self._set_icon()
 
         self.hosts: List[Dict[str, str]] = load_hosts()
@@ -269,18 +274,19 @@ class RDSInfoWindow(tk.Toplevel):
         self.lst_hosts.bind("<Double-Button-1>", lambda _: self._open_detail())
 
         btn_frame = ttk.Frame(container)
-        btn_frame.grid(row=1, column=1, sticky="ew", pady=(6, 0))
-        btn_frame.columnconfigure((0, 1, 2, 3), weight=1)
+        btn_frame.grid(row=1, column=1, sticky="new", pady=(6, 0))
+        for col in range(2):
+            btn_frame.columnconfigure(col, weight=1, minsize=120)
 
-        self.btn_view = ttk.Button(btn_frame, command=self._open_detail)
-        self.btn_edit = ttk.Button(btn_frame, command=self._edit_host)
-        self.btn_add = ttk.Button(btn_frame, command=self._add_host)
-        self.btn_remove = ttk.Button(btn_frame, command=self._remove_host)
+        self.btn_view = ttk.Button(btn_frame, command=self._open_detail, width=14)
+        self.btn_edit = ttk.Button(btn_frame, command=self._edit_host, width=14)
+        self.btn_add = ttk.Button(btn_frame, command=self._add_host, width=14)
+        self.btn_remove = ttk.Button(btn_frame, command=self._remove_host, width=14)
 
-        self.btn_view.grid(row=0, column=0, padx=2, sticky="ew")
-        self.btn_edit.grid(row=0, column=1, padx=2, sticky="ew")
-        self.btn_add.grid(row=0, column=2, padx=2, sticky="ew")
-        self.btn_remove.grid(row=0, column=3, padx=2, sticky="ew")
+        self.btn_view.grid(row=0, column=0, padx=4, pady=2, sticky="ew")
+        self.btn_edit.grid(row=0, column=1, padx=4, pady=2, sticky="ew")
+        self.btn_add.grid(row=1, column=0, padx=4, pady=2, sticky="ew")
+        self.btn_remove.grid(row=1, column=1, padx=4, pady=2, sticky="ew")
 
         self._apply_language()
         self._refresh_subsystems()

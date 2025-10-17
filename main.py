@@ -14,7 +14,7 @@ from screen.DB import insert as insert_screen
 from screen.DB import update as update_screen
 from screen.DB import backup as backup_screen
 from screen.MU import log_viewer as log_viewer
-from screen.General import rdsinfo
+from screen.General import history_window, rdsinfo
 from core import i18n
 
 APP_TITLE = "ToolONWA VIP v1.0"
@@ -141,6 +141,7 @@ class ToolVIP(tk.Tk):
         self._last_error = ""
         self._status_custom = False
         self.conn_blocks = {}
+        self._history_window = None
 
         self._setup_fonts()
         self._build_ui()
@@ -259,7 +260,7 @@ class ToolVIP(tk.Tk):
 
         self.frm_common = ttk.LabelFrame(root, padding=(8, 6), relief="ridge", borderwidth=2)
         self.frm_common.grid(row=2, column=0, sticky="ew", padx=2, pady=(0, 8))
-        for i in range(3):
+        for i in range(4):
             self.frm_common.columnconfigure(i, weight=1)
         self.btn_rds = ttk.Button(self.frm_common, command=self._open_rds_info)
         self.btn_rds.grid(row=0, column=0, padx=8, pady=4, sticky="ew")
@@ -267,6 +268,8 @@ class ToolVIP(tk.Tk):
         self.btn_docs.grid(row=0, column=1, padx=8, pady=4, sticky="ew")
         self.btn_tips = ttk.Button(self.frm_common, command=self._coming_soon)
         self.btn_tips.grid(row=0, column=2, padx=8, pady=4, sticky="ew")
+        self.btn_history = ttk.Button(self.frm_common, command=self._open_history_window)
+        self.btn_history.grid(row=0, column=3, padx=8, pady=4, sticky="ew")
 
         bottom = ttk.Frame(root)
         bottom.grid(row=3, column=0, sticky="ew", pady=(4, 0))
@@ -337,6 +340,8 @@ class ToolVIP(tk.Tk):
         self.btn_rds.config(text=self._t("main.btn.rds_info"))
         self.btn_docs.config(text=self._t("main.btn.docs"))
         self.btn_tips.config(text=self._t("main.btn.tips"))
+        if hasattr(self, "btn_history"):
+            self.btn_history.config(text=self._t("main.btn.history"))
 
         if not getattr(self, "_status_custom", False):
             self.lbl_status.config(text=self._t("main.status.not_connected"))
@@ -614,6 +619,25 @@ class ToolVIP(tk.Tk):
         else:
             backup_screen.open_restore_from_csv_window(self, info)
 
+
+
+    def _open_history_window(self):
+        """Mo man hinh lich su thao tac."""
+        try:
+            if self._history_window and self._history_window.winfo_exists():
+                self._history_window.lift()
+                self._history_window.focus_force()
+                return
+            window = history_window.HistoryWindow(self)
+
+            def _cleanup(event):
+                if event.widget is window:
+                    self._history_window = None
+
+            window.bind("<Destroy>", _cleanup)
+            self._history_window = window
+        except Exception as exc:
+            messagebox.showerror(APP_TITLE, self._t("history.msg.open_error", error=str(exc)), parent=self)
 
 
     def _open_log_view_mu(self):

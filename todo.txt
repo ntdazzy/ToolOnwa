@@ -55,7 +55,7 @@ Bạn là trợ lý lập trình, làm việc trên dự án Tkinter “ToolONWA
 
 6. MessageBox & comment tiếng Việt:
    - Thay mọi messagebox (“Thiếu thông tin…”, “Restore…”) bằng chuỗi lấy từ i18n.
-   - Viết lại comment hoặc docstring tiếng Việt ngắn gọn cho mọi hàm quan trọng (ngắn gọn mô tả chức năng).
+   - Viết comment hoặc docstring tiếng Việt ngắn gọn cho mọi hàm (ngắn gọn mô tả chức năng).
 
 7. Kiểm thử và rà soát:
    - Chạy `python -m compileall main.py screen` để bảo đảm không lỗi cú pháp.

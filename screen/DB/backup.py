@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 
 from screen.DB import db_utils
 from screen.DB.widgets import DataGrid, LoadingPopup
-from core import i18n
+from core import history, i18n
 
 APP_TITLE_KEY = "common.app_title"
 
@@ -40,6 +40,7 @@ class BackupRestoreBase(tk.Toplevel):
         self.resizable(True, True)
         self._set_icon()
 
+        self._history_action_type = "sql_script"
         self._table_items: List[Dict[str, str]] = []
         self._table_view: List[Dict[str, str]] = []
         self._active_table: Optional[Dict[str, str]] = None
@@ -90,6 +91,20 @@ class BackupRestoreBase(tk.Toplevel):
 
     def _build_body(self, parent: ttk.Frame):
         raise NotImplementedError
+
+    def _history_object_name(self) -> str:
+        """Lay ten doi tuong dung cho ghi log."""
+        try:
+            value = self.var_selected_table.get().strip()  # type: ignore[attr-defined]
+        except Exception:
+            value = ""
+        if not value:
+            try:
+                backup = self.var_backup_name.get().strip()  # type: ignore[attr-defined]
+                value = backup or value
+            except Exception:
+                pass
+        return value
 
     # ------------------------------------------------------------------
     def _connect_async(self):
@@ -252,19 +267,36 @@ class BackupRestoreBase(tk.Toplevel):
 
     # ------------------------------------------------------------------
     def _run_statements(self, sql_text: str) -> bool:
-        """Thực thi lần lượt các câu SQL đã chuẩn bị."""
+        """Thuc thi lan luot cac cau SQL da chuan bi va ghi log."""
+        object_name = self._history_object_name()
+        sql_trim = (sql_text or "").strip()
         if not self.conn:
+            history.log_action(self._history_action_type, object_name, 0, "failed", message=self._t("backup.msg.not_connected"), sql_text=sql_trim)
             messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.not_connected"), parent=self)
             return False
         statements = [stmt.strip() for stmt in re.split(r";\s*(?:\n|$)", sql_text) if stmt.strip()]
         if not statements:
             messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("backup.msg.no_statement"), parent=self)
             return False
+        row_count = len(statements)
         try:
             cur = self.conn.cursor()
         except Exception as exc:
-            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.cursor_error", error=str(exc)), parent=self)
+            msg = self._t("backup.msg.cursor_error", error=str(exc))
+            history.log_action(self._history_action_type, object_name, row_count, "failed", message=msg, sql_text=sql_trim)
+            messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return False
+
+        action_id = history.log_action(self._history_action_type, object_name, row_count, "pending", message="SQL script", sql_text=sql_trim)
+
+        def _finalize(status: str, message: str) -> None:
+            try:
+                if action_id:
+                    history.mark_action_status(action_id, status, message, row_count=row_count, sql_text=sql_trim)
+                else:
+                    history.log_action(self._history_action_type, object_name, row_count, status, message=message, sql_text=sql_trim)
+            except Exception:
+                pass
 
         try:
             for stmt in statements:
@@ -277,10 +309,13 @@ class BackupRestoreBase(tk.Toplevel):
                         continue
                     self.conn.rollback()
                     self._append_log(f"  ERROR: {exc}")
-                    messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.execute_error", error=str(exc)), parent=self)
+                    msg = self._t("backup.msg.execute_error", error=str(exc))
+                    _finalize("failed", msg)
+                    messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
                     return False
             self.conn.commit()
             self._append_log(self._t("backup.log.complete"))
+            _finalize("success", self._t("backup.log.complete"))
             messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("backup.msg.execute_success"), parent=self)
             return True
         finally:
@@ -288,6 +323,7 @@ class BackupRestoreBase(tk.Toplevel):
                 cur.close()
             except Exception:
                 pass
+
 
     @staticmethod
     def _should_ignore_drop(statement: str, exc: Exception) -> bool:
@@ -333,6 +369,7 @@ class BackupWindow(BackupRestoreBase):
 
     def __init__(self, parent: tk.Widget, connection: Dict[str, str]):
         super().__init__(parent, connection, title_key="backup.title")
+        self._history_action_type = "backup_sql"
 
     def _build_body(self, parent: ttk.Frame):
         """Xây dựng giao diện đặc thù cho tác vụ backup."""
@@ -433,6 +470,7 @@ class RestoreFromBackupWindow(BackupRestoreBase):
 
     def __init__(self, parent: tk.Widget, connection: Dict[str, str]):
         super().__init__(parent, connection, title_key="backup.restore_backup.title")
+        self._history_action_type = "restore_backup_sql"
 
     def _build_body(self, parent: ttk.Frame):
         """Xây dựng giao diện dành cho restore từ bảng backup."""
@@ -555,6 +593,8 @@ class RestoreFromCSVWindow(BackupRestoreBase):
     def __init__(self, parent: tk.Widget, connection: Dict[str, str]):
         self.imported_rows: List[Dict[str, str]] = []
         self.csv_headers: List[str] = []
+        self._last_csv_path: Optional[str] = None
+        self._history_action_type = "restore_csv"
         super().__init__(parent, connection, title_key="backup.restore_csv.title")
 
     def _build_body(self, parent: ttk.Frame):
@@ -627,6 +667,7 @@ class RestoreFromCSVWindow(BackupRestoreBase):
         )
         if not path:
             return
+        self._last_csv_path = path
         try:
             with open(path, "r", encoding="utf-8-sig", newline="") as f:
                 reader = csv.DictReader(f)
@@ -674,7 +715,7 @@ class RestoreFromCSVWindow(BackupRestoreBase):
         self.lbl_file.config(text=self._t("backup.label.no_file"))
 
     def _execute_restore(self):
-        """Restore dữ liệu CSV vào bảng đích."""
+        """Restore du lieu CSV vao bang dich."""
         table = self.var_selected_table.get().strip()
         if not table:
             messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("backup.msg.select_table"), parent=self)
@@ -682,12 +723,16 @@ class RestoreFromCSVWindow(BackupRestoreBase):
         if not self.imported_rows:
             messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("backup.msg.no_csv_data"), parent=self)
             return
+        row_count = len(self.imported_rows)
+        sql_summary = f"CSV restore into {table}"
+        log_message = f"Restore from {self._last_csv_path}" if getattr(self, "_last_csv_path", None) else "Restore from CSV"
         if not self.conn:
+            history.log_action(self._history_action_type, table, row_count, "failed", message=self._t("backup.msg.not_connected"), sql_text=sql_summary)
             messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.not_connected"), parent=self)
             return
         if not messagebox.askyesno(
             self._t(APP_TITLE_KEY),
-            self._t("backup.msg.restore_confirm", count=len(self.imported_rows), table=table),
+            self._t("backup.msg.restore_confirm", count=row_count, table=table),
             parent=self,
         ):
             return
@@ -699,8 +744,21 @@ class RestoreFromCSVWindow(BackupRestoreBase):
         try:
             cur = self.conn.cursor()
         except Exception as exc:
-            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.cursor_error", error=str(exc)), parent=self)
+            msg = self._t("backup.msg.cursor_error", error=str(exc))
+            history.log_action(self._history_action_type, full_table, row_count, "failed", message=msg, sql_text=sql_summary)
+            messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return
+
+        action_id = history.log_action(self._history_action_type, full_table, row_count, "pending", message=log_message, sql_text=sql_summary)
+
+        def _finalize(status: str, message: str) -> None:
+            try:
+                if action_id:
+                    history.mark_action_status(action_id, status, message, row_count=row_count, sql_text=sql_summary)
+                else:
+                    history.log_action(self._history_action_type, full_table, row_count, status, message=message, sql_text=sql_summary)
+            except Exception:
+                pass
 
         try:
             for idx, row in enumerate(self.imported_rows, start=1):
@@ -717,7 +775,9 @@ class RestoreFromCSVWindow(BackupRestoreBase):
         except Exception as exc:
             self.conn.rollback()
             self._append_log(f"ERROR: {exc}")
-            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.restore_error", error=str(exc)), parent=self)
+            msg = self._t("backup.msg.restore_error", error=str(exc))
+            _finalize("failed", msg)
+            messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return
         finally:
             try:
@@ -726,7 +786,9 @@ class RestoreFromCSVWindow(BackupRestoreBase):
                 pass
 
         self._append_log(self._t("backup.log.restore_done"))
+        _finalize("success", self._t("backup.log.restore_done"))
         messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("backup.msg.restore_success"), parent=self)
+
 
     def _apply_language(self) -> None:
         """Cập nhật chuỗi dịch cho các thành phần restore CSV."""

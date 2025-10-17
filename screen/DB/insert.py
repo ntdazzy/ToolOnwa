@@ -11,9 +11,12 @@ from typing import Dict, List, Optional
 
 from screen.DB import db_utils
 from screen.DB.widgets import ColumnOrderDialog, DataGrid, DuplicatePreviewDialog, LoadingPopup
-from core import i18n
+from core import history, i18n, templates
+from screen.DB.template_dialog import TemplateLibraryDialog, TemplateSaveDialog
 
 APP_TITLE_KEY = "common.app_title"
+
+ACTIVE_WINDOWS: List["InsertWindow"] = []
 
 
 class InsertWindow(tk.Toplevel):
@@ -37,8 +40,12 @@ class InsertWindow(tk.Toplevel):
         self._column_meta: Dict[str, dict] = {}
         self._pk_columns: List[str] = []
         self._generated_rows: List[Dict[str, str]] = []
+        self._draft_history_id: Optional[int] = None
+        self._draft_history_sql: str = ""
         self._loader: Optional[LoadingPopup] = None
         self._current_table_label: str = "..."
+
+        ACTIVE_WINDOWS.append(self)
 
         self._build_ui()
         self._lang_listener = self._handle_language_change
@@ -119,14 +126,18 @@ class InsertWindow(tk.Toplevel):
         self.grp_actions.grid(row=0, column=1, sticky="n", padx=(0, 8))
         self.btn_build_sql = ttk.Button(self.grp_actions, text=self._t("insert.btn.build_sql"), command=self._generate_sql)
         self.btn_build_sql.grid(row=0, column=0, sticky="ew", pady=4)
+        self.btn_save_template = ttk.Button(self.grp_actions, text=self._t("insert.btn.save_template"), command=self._save_template)
+        self.btn_save_template.grid(row=1, column=0, sticky="ew", pady=4)
+        self.btn_select_template = ttk.Button(self.grp_actions, text=self._t("insert.btn.select_template"), command=self._open_template_library)
+        self.btn_select_template.grid(row=2, column=0, sticky="ew", pady=4)
         self.btn_copy = ttk.Button(self.grp_actions, text=self._t("common.copy"), command=self._copy_sql)
-        self.btn_copy.grid(row=1, column=0, sticky="ew", pady=4)
+        self.btn_copy.grid(row=3, column=0, sticky="ew", pady=4)
         self.btn_reorder = ttk.Button(self.grp_actions, text=self._t("insert.btn.reorder"), command=self._change_column_order)
-        self.btn_reorder.grid(row=2, column=0, sticky="ew", pady=4)
+        self.btn_reorder.grid(row=4, column=0, sticky="ew", pady=4)
         self.btn_execute = ttk.Button(self.grp_actions, text=self._t("insert.btn.execute"), command=self._execute)
-        self.btn_execute.grid(row=3, column=0, sticky="ew", pady=4)
+        self.btn_execute.grid(row=5, column=0, sticky="ew", pady=4)
         self.btn_clear = ttk.Button(self.grp_actions, text=self._t("insert.btn.clear"), command=self._clear)
-        self.btn_clear.grid(row=4, column=0, sticky="ew", pady=4)
+        self.btn_clear.grid(row=6, column=0, sticky="ew", pady=4)
 
 
 
@@ -310,9 +321,31 @@ class InsertWindow(tk.Toplevel):
                 values.append(literal)
             sql_lines.append(f"INSERT INTO {table} ({column_list}) VALUES ({', '.join(values)});")
             formatted_rows.append(row)
+        sql_text = "".join(sql_lines)
         self.txt_sql.delete("1.0", tk.END)
-        self.txt_sql.insert(tk.END, "".join(sql_lines))
+        self.txt_sql.insert(tk.END, sql_text)
         self._generated_rows = formatted_rows
+        self._record_history_draft(table, sql_text, len(rows))
+
+    def _record_history_draft(self, table: str, sql_text: str, row_count: int) -> None:
+        """Ghi log ban nhap SQL o trang thai nhap."""
+        trimmed = (sql_text or "").strip()
+        self._draft_history_sql = trimmed
+        if not trimmed:
+            self._draft_history_id = None
+            return
+        try:
+            action_id = history.log_action(
+                "insert_sql",
+                table or "",
+                row_count,
+                "draft",
+                message=(f"Draft insert for {table}" if table else "Draft insert SQL"),
+                sql_text=trimmed,
+            )
+            self._draft_history_id = action_id
+        except Exception:
+            self._draft_history_id = None
 
     def _copy_sql(self):
         """Copy câu SQL đã sinh vào clipboard."""
@@ -322,6 +355,41 @@ class InsertWindow(tk.Toplevel):
         self.clipboard_clear()
         self.clipboard_append(data)
         messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("insert.msg.copy_done"), parent=self)
+
+    def _save_template(self):
+        """Luu cau SQL hien tai vao thu vien template."""
+        sql_text = self.txt_sql.get("1.0", tk.END).strip()
+        if not sql_text:
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("template.save.message_no_sql"), parent=self)
+            return
+        default_name = self._current_table() or self._current_table_label or "INSERT_SQL"
+        dlg = TemplateSaveDialog(self, default_type="insert", default_name=default_name)
+        self.wait_window(dlg)
+        data = getattr(dlg, "result", None)
+        if not data:
+            return
+        tpl = templates.add_template(data["name"], data["type"], sql_text, data.get("description", ""))
+        if tpl:
+            messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("template.save.message_saved"), parent=self)
+        else:
+            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("common.error"), parent=self)
+
+    def _open_template_library(self):
+        """Mo thu vien template de chon cau SQL co san."""
+        dlg = TemplateLibraryDialog(self, template_type="insert")
+        self.wait_window(dlg)
+        record = getattr(dlg, "result", None)
+        if record and record.get("content"):
+            self.set_sql_text(record["content"])
+
+    def set_sql_text(self, sql_text: str) -> None:
+        """Dat lai noi dung SQL va dua cua so len truoc."""
+        self.txt_sql.delete("1.0", tk.END)
+        self.txt_sql.insert(tk.END, sql_text)
+        self._draft_history_sql = (sql_text or "").strip()
+        self._draft_history_id = None
+        self.lift()
+        self.focus_force()
 
     def _change_column_order(self):
         """Thay đổi thứ tự các cột trước khi xuất SQL."""
@@ -347,9 +415,11 @@ class InsertWindow(tk.Toplevel):
         self.grid.append_dict({})
         self.txt_sql.delete("1.0", tk.END)
         self._generated_rows.clear()
+        self._draft_history_id = None
+        self._draft_history_sql = ""
 
     def _execute(self):
-        """Thực thi câu lệnh INSERT lên cơ sở dữ liệu."""
+        """Thuc thi cau lenh INSERT len co so du lieu."""
         table = self._current_table()
         if not table:
             messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("insert.msg.no_table"), parent=self)
@@ -360,15 +430,20 @@ class InsertWindow(tk.Toplevel):
             return
         if not messagebox.askyesno(self._t(APP_TITLE_KEY), self._t("insert.msg.confirm_execute"), parent=self):
             return
+        row_count = len(rows)
+        sql_text_full = self.txt_sql.get("1.0", tk.END)
+        sql_text_trim = (sql_text_full or "").strip()
         if not self.conn:
-            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("insert.msg.not_connected"), parent=self)
+            msg = self._t("insert.msg.not_connected")
+            self._log_history_status("failed", msg, row_count, sql_text_trim, table)
+            messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return
         pk_cols = self._pk_columns
         pk_missing = [row for row in rows if any(not row.get(pk) for pk in pk_cols)]
         if pk_cols and pk_missing:
             if not messagebox.askyesno(self._t(APP_TITLE_KEY), self._t("insert.msg.pk_missing_confirm"), parent=self):
                 return
-        duplicates = {}
+        duplicates: Dict[tuple, Dict[str, str]] = {}
         try:
             if pk_cols:
                 keys = []
@@ -378,7 +453,9 @@ class InsertWindow(tk.Toplevel):
                     keys.append([row.get(pk) for pk in pk_cols])
                 duplicates = db_utils.fetch_rows_by_pk(self.conn, table, self.current_owner, pk_cols, keys)
         except Exception as exc:
-            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("insert.msg.check_duplicates_error", error=str(exc)), parent=self)
+            msg = self._t("insert.msg.check_duplicates_error", error=str(exc))
+            self._log_history_status("failed", msg, row_count, sql_text_trim, table)
+            messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return
 
         if duplicates:
@@ -407,7 +484,9 @@ class InsertWindow(tk.Toplevel):
                     duplicates.keys(),
                 )
             except Exception as exc:
-                messagebox.showerror(self._t(APP_TITLE_KEY), self._t("insert.msg.delete_old_error", error=str(exc)), parent=self)
+                msg = self._t("insert.msg.delete_old_error", error=str(exc))
+                self._log_history_status("failed", msg, row_count, sql_text_trim, table)
+                messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
                 return
 
         try:
@@ -416,8 +495,12 @@ class InsertWindow(tk.Toplevel):
                 ordered_rows.append([row.get(col) if row.get(col) != "" else None for col in self._columns])
             db_utils.insert_rows(self.conn, table, self.current_owner, self._columns, ordered_rows)
         except Exception as exc:
-            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("insert.msg.insert_error", error=str(exc)), parent=self)
+            msg = self._t("insert.msg.insert_error", error=str(exc))
+            self._log_history_status("failed", msg, row_count, sql_text_trim, table)
+            messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return
+
+        self._log_history_status("success", self._t("insert.msg.insert_success"), row_count, sql_text_trim, table)
         messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("insert.msg.insert_success"), parent=self)
 
 
@@ -442,7 +525,52 @@ class InsertWindow(tk.Toplevel):
         """Hủy toplevel và gỡ listener ngôn ngữ."""
         if hasattr(self, "_lang_listener"):
             i18n.remove_listener(self._lang_listener)
+        if self in ACTIVE_WINDOWS:
+            try:
+                ACTIVE_WINDOWS.remove(self)
+            except ValueError:
+                pass
         super().destroy()
+
+    def _log_history_status(self, status: str, message: str, row_count: int, sql_text: str, table: Optional[str]) -> None:
+        """Cap nhat lich su insert voi trang thai cu the."""
+        trimmed = (sql_text or "").strip()
+        base_trim = (self._draft_history_sql or "").strip()
+        if not trimmed and base_trim:
+            trimmed = base_trim
+            sql_text = base_trim
+        try:
+            if self._draft_history_id and trimmed and base_trim and trimmed == base_trim:
+                updated = history.mark_action_status(
+                    self._draft_history_id,
+                    status,
+                    message,
+                    row_count=row_count,
+                    sql_text=sql_text,
+                )
+                if not updated:
+                    history.log_action(
+                        "insert_execute",
+                        table or "",
+                        row_count,
+                        status,
+                        message=message,
+                        sql_text=sql_text,
+                    )
+            else:
+                history.log_action(
+                    "insert_execute",
+                    table or "",
+                    row_count,
+                    status,
+                    message=message,
+                    sql_text=sql_text,
+                )
+        except Exception:
+            pass
+        finally:
+            if status in {"success", "failed"}:
+                self._draft_history_id = None
 
     def _show_loading(self, message: str):
         """Mở popup loading với thông điệp tương ứng."""
@@ -472,6 +600,10 @@ class InsertWindow(tk.Toplevel):
             self.grp_actions.config(text=self._t("insert.section.actions"))
         if hasattr(self, "btn_build_sql"):
             self.btn_build_sql.config(text=self._t("insert.btn.build_sql"))
+        if hasattr(self, "btn_save_template"):
+            self.btn_save_template.config(text=self._t("insert.btn.save_template"))
+        if hasattr(self, "btn_select_template"):
+            self.btn_select_template.config(text=self._t("insert.btn.select_template"))
         if hasattr(self, "btn_copy"):
             self.btn_copy.config(text=self._t("common.copy"))
         if hasattr(self, "btn_reorder"):
@@ -512,3 +644,8 @@ class InsertWindow(tk.Toplevel):
 def open_insert_window(parent: tk.Widget, connection: Dict[str, str]):
     """Mở cửa sổ Insert."""
     InsertWindow(parent, connection)
+
+
+def get_active_windows() -> List["InsertWindow"]:
+    """Tra ve danh sach cua so Insert dang mo."""
+    return [win for win in ACTIVE_WINDOWS if win.winfo_exists()]
