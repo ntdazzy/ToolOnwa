@@ -148,6 +148,8 @@ class EditableTreeview(ttk.Treeview):
         self._editor: Optional[tk.Entry] = None
         self._editor_item: Optional[str] = None
         self._editor_column: Optional[str] = None
+        self._current_item: Optional[str] = None
+        self._current_column: Optional[str] = None
 
         self.bind("<Double-1>", self._on_double_click)
         self.bind("<Return>", self._on_return)
@@ -157,14 +159,20 @@ class EditableTreeview(ttk.Treeview):
         self.bind("<Control-c>", self._copy_selection)
         self.bind("<Control-a>", self._select_all)
         self.bind("<Control-v>", self._paste_clipboard)
-        self.bind("<<TreeviewSelect>>", lambda _e: self._highlight_selection(), add="+")
+        self.bind("<Tab>", self._on_tab, add="+")
+        self.bind("<Shift-Tab>", self._on_shift_tab, add="+")
+        self.bind("<ISO_Left_Tab>", self._on_shift_tab, add="+")
+        self.bind("<Key>", self._on_key_press, add="+")
+        self.bind("<<TreeviewSelect>>", self._on_tree_select, add="+")
 
         self._dragging = False
         self._last_click_region = ""
         self._editing_tag = "grid-row-editing"
+        self._new_row_tag = "grid-row-new"
         self.tag_configure("grid-row-even", background="#FFFFFF")
         self.tag_configure("grid-row-odd", background="#F8FAFF")
         self.tag_configure(self._editing_tag, background="#E0ECFF")
+        self.tag_configure(self._new_row_tag, background="#FEF3C7")
 
     # ---- editing -------------------------------------------------
     def _on_double_click(self, event):
@@ -173,26 +181,214 @@ class EditableTreeview(ttk.Treeview):
             return
         row_id = self.identify_row(event.y)
         col_id = self.identify_column(event.x)
-        self._open_editor(row_id, col_id)
+        if row_id:
+            self._set_current_cell(row_id, col_id)
+            self._open_editor(row_id, self._current_column or col_id)
 
     def _on_return(self, event):
         sel = self.selection()
         if not sel:
             return "break"
         row_id = sel[0]
-        col_id = self.focus_column() or self["columns"][0]
-        self._open_editor(row_id, col_id)
+        columns = list(self["columns"])
+        column = self._current_column or (columns[0] if columns else None)
+        if column:
+            self._open_editor(row_id, column)
         return "break"
 
     def _on_click(self, event):
         region = self.identify("region", event.x, event.y)
         self._last_click_region = region
-        if region != "cell":
+        if region == "cell":
+            row_id = self.identify_row(event.y)
+            col_id = self.identify_column(event.x)
+            if row_id:
+                self._set_current_cell(row_id, col_id)
+        else:
             self._save_editor()
 
     def _on_release(self, _event):
         if self._last_click_region != "cell":
             self._save_editor()
+
+    def _column_from_identifier(self, column_id: Optional[str]) -> Optional[str]:
+        """Convert Treeview column identifier (#1) về tên cột."""
+        if not column_id:
+            return None
+        columns = list(self["columns"])
+        if column_id.startswith("#"):
+            try:
+                index = int(column_id[1:]) - 1
+            except ValueError:
+                return None
+            if 0 <= index < len(columns):
+                return columns[index]
+            return None
+        return column_id if column_id in columns else None
+
+    def _set_current_cell(self, item: Optional[str], column_id: Optional[str]) -> None:
+        """Ghi nhận vị trí ô hiện tại để phục vụ điều hướng."""
+        if not item:
+            return
+        column_name = self._column_from_identifier(column_id)
+        columns = list(self["columns"])
+        if not column_name and columns:
+            column_name = columns[0]
+        self._current_item = item
+        self._current_column = column_name
+        try:
+            self.selection_set(item)
+            self.focus(item)
+            self.see(item)
+        except tk.TclError:
+            pass
+
+    def _focus_current_cell(self) -> None:
+        if not self._current_item:
+            return
+        try:
+            self.selection_set(self._current_item)
+            self.focus(self._current_item)
+            self.see(self._current_item)
+        except tk.TclError:
+            pass
+
+    def _on_tree_select(self, _event):
+        """Cập nhật ô hiện tại khi người dùng chọn dòng mới."""
+        self._highlight_selection()
+        sel = self.selection()
+        if sel:
+            self._current_item = sel[0]
+            columns = list(self["columns"])
+            if self._current_column not in columns and columns:
+                self._current_column = columns[0]
+
+    def _advance_cell(self, forward: bool, *, wrap: bool = True) -> bool:
+        """Di chuyển sang ô kế tiếp / trước giống Excel."""
+        columns = list(self["columns"])
+        rows = list(self.get_children(""))
+        if not columns or not rows:
+            return False
+        item = self._current_item if self._current_item in rows else (self.selection()[0] if self.selection() else rows[0])
+        column = self._current_column if self._current_column in columns else columns[0]
+        row_idx = rows.index(item)
+        col_idx = columns.index(column)
+        if forward:
+            if col_idx < len(columns) - 1:
+                col_idx += 1
+            elif wrap and row_idx < len(rows) - 1:
+                row_idx += 1
+                col_idx = 0
+            else:
+                if not wrap:
+                    return False
+                col_idx = len(columns) - 1
+        else:
+            if col_idx > 0:
+                col_idx -= 1
+            elif wrap and row_idx > 0:
+                row_idx -= 1
+                col_idx = len(columns) - 1
+            else:
+                if not wrap:
+                    return False
+                col_idx = 0
+        self._current_item = rows[row_idx]
+        self._current_column = columns[col_idx]
+        self._focus_current_cell()
+        return True
+
+    def _move_vertical(self, offset: int) -> bool:
+        """Di chuyển lên/xuống theo số dòng offset."""
+        if offset == 0:
+            return False
+        rows = list(self.get_children(""))
+        if not rows:
+            return False
+        item = self._current_item if self._current_item in rows else (self.selection()[0] if self.selection() else rows[0])
+        row_idx = rows.index(item)
+        new_idx = min(max(row_idx + offset, 0), len(rows) - 1)
+        if new_idx == row_idx:
+            return False
+        self._current_item = rows[new_idx]
+        columns = list(self["columns"])
+        if self._current_column not in columns and columns:
+            self._current_column = columns[0]
+        self._focus_current_cell()
+        return True
+
+    def _begin_edit_current_cell(self) -> None:
+        if self._current_item and self._current_column:
+            self._open_editor(self._current_item, self._current_column)
+
+    def _on_tab(self, _event):
+        if self._editor:
+            return None
+        self._save_editor()
+        if self._advance_cell(True):
+            self._focus_current_cell()
+        return "break"
+
+    def _on_shift_tab(self, _event):
+        if self._editor:
+            return None
+        self._save_editor()
+        if self._advance_cell(False):
+            self._focus_current_cell()
+        return "break"
+
+    def _cycle_from_editor(self, forward: bool):
+        self._save_editor()
+        if self._advance_cell(forward):
+            self._begin_edit_current_cell()
+        return "break"
+
+    def _move_editor_vertical(self, offset: int):
+        self._save_editor()
+        if self._move_vertical(offset):
+            self._begin_edit_current_cell()
+        return "break"
+
+    def _on_key_press(self, event):
+        if self._editor:
+            return None
+        keysym = event.keysym
+        if keysym in {"Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R"}:
+            return None
+        if keysym in {"Up", "Down"}:
+            if self._move_vertical(-1 if keysym == "Up" else 1):
+                return "break"
+            return None
+        if keysym in {"Left", "Right"}:
+            if self._advance_cell(keysym == "Right", wrap=False):
+                self._focus_current_cell()
+                return "break"
+            return None
+        if keysym in {"Tab", "ISO_Left_Tab"}:
+            return "break"
+        char = event.char or ""
+        if char and char.isprintable() and not (event.state & 0x0004) and not (event.state & 0x0008):
+            columns = list(self["columns"])
+            if not columns:
+                return "break"
+            if not self.selection():
+                rows = self.get_children("")
+                if not rows:
+                    return "break"
+                self.selection_set(rows[0])
+                self._set_current_cell(rows[0], columns[0])
+            if not self._current_column:
+                self._current_column = columns[0]
+            sel = self.selection()
+            if not sel:
+                return "break"
+            self._begin_edit_current_cell()
+            if self._editor:
+                self._editor.delete(0, tk.END)
+                self._editor.insert(0, char)
+                self._editor.icursor(tk.END)
+            return "break"
+        return None
 
     def _open_editor(self, item: str, column: str):
         if not item or not column:
@@ -200,6 +396,7 @@ class EditableTreeview(ttk.Treeview):
         bbox = self.bbox(item, column)
         if not bbox:
             return
+        self._set_current_cell(item, column)
         self._close_editor()
         x, y, w, h = bbox
         value = self.set(item, column)
@@ -211,6 +408,11 @@ class EditableTreeview(ttk.Treeview):
         editor.bind("<Return>", lambda e: self._save_editor())
         editor.bind("<Escape>", lambda e: self._close_editor())
         editor.bind("<FocusOut>", lambda e: self._save_editor())
+        editor.bind("<Tab>", lambda e: self._cycle_from_editor(True))
+        editor.bind("<Shift-Tab>", lambda e: self._cycle_from_editor(False))
+        editor.bind("<ISO_Left_Tab>", lambda e: self._cycle_from_editor(False))
+        editor.bind("<Down>", lambda e: self._move_editor_vertical(1))
+        editor.bind("<Up>", lambda e: self._move_editor_vertical(-1))
         self._editor = editor
         self._editor_item = item
         self._editor_column = column
@@ -220,8 +422,11 @@ class EditableTreeview(ttk.Treeview):
         if not self._editor:
             return
         value = self._editor.get()
-        if self._editor_item and self._editor_column:
-            self.set(self._editor_item, self._editor_column, value)
+        item = self._editor_item
+        column = self._editor_column
+        if item and column:
+            self.set(item, column, value)
+            self._set_current_cell(item, column)
         self._close_editor()
         self.refresh_striping()
 
@@ -287,7 +492,7 @@ class EditableTreeview(ttk.Treeview):
             values = {}
             for idx, col in enumerate(headers):
                 values[col] = parts[idx] if idx < len(parts) else ""
-            self._append_row(values)
+            self._append_row(values, mark_new=True)
         self.refresh_striping()
         return "break"
 
@@ -309,17 +514,21 @@ class EditableTreeview(ttk.Treeview):
 
     def set_data(self, rows: Iterable[Dict[str, Any]]):
         self.clear()
-        for idx, row in enumerate(rows):
-            values = [str(row.get(col, "")) if row.get(col) is not None else "" for col in self["columns"]]
-            self.insert("", "end", iid=f"row{idx}", values=values)
+        for row in rows:
+            self._append_row(row, mark_new=False)
         self.refresh_striping()
 
-    def append_dict(self, row: Dict[str, Any]):
-        self._append_row(row)
+    def append_dict(self, row: Dict[str, Any], *, mark_new: bool = True):
+        self._append_row(row, mark_new=mark_new)
         self.refresh_striping()
 
-    def _append_row(self, row: Dict[str, Any]):
+    def _append_row(self, row: Dict[str, Any], *, mark_new: bool = True):
         iid = self.insert("", "end")
+        if mark_new:
+            tags = list(self.item(iid, "tags"))
+            if self._new_row_tag not in tags:
+                tags.append(self._new_row_tag)
+                self.item(iid, tags=tags)
         for col in self["columns"]:
             val = row.get(col, "")
             self.set(iid, col, "" if val is None else str(val))
@@ -333,7 +542,8 @@ class EditableTreeview(ttk.Treeview):
                 continue
             tags = [t for t in self.item(item, "tags") if t != self._editing_tag]
             tags = [t for t in tags if t not in ("grid-row-even", "grid-row-odd")]
-            tags.append("grid-row-even" if idx % 2 else "grid-row-odd")
+            if self._new_row_tag not in tags:
+                tags.append("grid-row-even" if idx % 2 else "grid-row-odd")
             self.item(item, tags=tags)
 
     def _flag_editing_row(self, item: str, editing: bool):
@@ -363,7 +573,8 @@ class EditableTreeview(ttk.Treeview):
                 idx = self.index(iid)
             except tk.TclError:
                 idx = 0
-            tags.append("grid-row-even" if idx % 2 else "grid-row-odd")
+            if self._new_row_tag not in tags:
+                tags.append("grid-row-even" if idx % 2 else "grid-row-odd")
             self.item(iid, tags=tags)
 
     def _highlight_selection(self):
@@ -409,7 +620,7 @@ class EditableTreeview(ttk.Treeview):
             values = {}
             for col_index, col in enumerate(self["columns"]):
                 values[col] = data_row[col_index] if col_index < len(data_row) else ""
-            self._append_row(values)
+            self._append_row(values, mark_new=True)
         self.refresh_striping()
 
 
@@ -467,8 +678,8 @@ class DataGrid(ttk.Frame):
     def set_data(self, rows: Iterable[Dict[str, Any]]):
         self.tree.set_data(rows)
 
-    def append_dict(self, row: Dict[str, Any]):
-        self.tree.append_dict(row)
+    def append_dict(self, row: Dict[str, Any], *, mark_new: bool = True):
+        self.tree.append_dict(row, mark_new=mark_new)
 
     def get_all(self) -> List[Dict[str, Any]]:
         """Trả về toàn bộ dữ liệu hiện có trong lưới."""

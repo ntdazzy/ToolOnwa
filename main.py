@@ -10,6 +10,7 @@ from tkinter import font as tkfont
 from tkinter.scrolledtext import ScrolledText
 from screen.DB import edit_connection
 from screen.DB import cmd_sql_plus
+from screen.DB import db_utils
 from screen.DB import insert as insert_screen
 from screen.DB import update as update_screen
 from screen.DB import backup as backup_screen
@@ -433,8 +434,6 @@ class ToolVIP(tk.Tk):
         data_src=self.ent_dsn.get().strip()
         if not (user and pwd and data_src):
             messagebox.showwarning(APP_TITLE, self._t("main.msg.missing_credentials")); return
-        dsn = f"{host}:{port}/{data_src}" if (self.var_use_host_port.get() and host and port) else data_src
-
         loading = tk.Toplevel(self)
         loading.title("Checking...")
         loading.resizable(False, False)
@@ -458,13 +457,18 @@ class ToolVIP(tk.Tk):
 
         def worker():
             try:
-                try:
-                    import oracledb as driver
-                except Exception:
-                    import cx_Oracle as driver  # type: ignore
-                conn = driver.connect(user=user, password=pwd, dsn=dsn)
+                conn = db_utils.connect_oracle(
+                    user,
+                    pwd,
+                    host,
+                    port,
+                    data_src,
+                    bool(self.var_use_host_port.get()),
+                )
                 conn.close()
                 result["ok"] = True
+            except db_utils.OracleDriverNotAvailable as e:
+                result["msg"] = str(e)
             except Exception as e:
                 result["msg"] = str(e)
             finally:
@@ -642,8 +646,6 @@ class ToolVIP(tk.Tk):
 
 def main(): app=ToolVIP(); app.mainloop()
 if __name__=="__main__": main()
-
-
 
 
 

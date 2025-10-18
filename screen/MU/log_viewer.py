@@ -1,12 +1,14 @@
 # log_viewer.py
 import os
 import re
+import subprocess
 import sys
 import tkinter as tk
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, ttk, messagebox
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 from core import i18n
 
@@ -55,26 +57,107 @@ class ErrorEntry:
     details: str
 
 
-def _parse_param_line(line: str) -> List[Tuple[str, str]]:
-    """Tách dòng Parameters thành danh sách giá trị + kiểu."""
+def _split_param_chunks(text: str) -> List[str]:
+    """Tách chuỗi tham số thành các cụm độc lập, giữ nguyên nội dung trong ngoặc."""
+    text = text.strip().rstrip(",")
+    if not text:
+        return []
+    chunks: List[str] = []
+    buf: List[str] = []
+    depth = 0
+    for ch in text:
+        if ch == "," and depth == 0:
+            chunk = "".join(buf).strip()
+            if chunk:
+                chunks.append(chunk)
+            buf = []
+            continue
+        buf.append(ch)
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(depth - 1, 0)
+    tail = "".join(buf).strip()
+    if tail:
+        chunks.append(tail)
+    return chunks
+
+
+def _parse_param_text(text: str) -> List[Tuple[str, str]]:
+    """Chuyển chuỗi giá trị tham số thành cặp (giá trị, kiểu)."""
     params: List[Tuple[str, str]] = []
-    try:
-        param_str = line.split("Parameters:", 1)[1].strip()
-    except Exception:
-        return params
-    if not param_str:
-        return params
-    parts = [p.strip() for p in param_str.split(",") if p.strip()]
-    for p in parts:
-        m = re.match(r"(.*)\((.*)\)", p)
+    for chunk in _split_param_chunks(text):
+        m = re.match(r"(.*)\((.*)\)", chunk)
         if m:
-            val = m.group(1)
-            typ = m.group(2)
+            val = m.group(1).strip()
+            typ = m.group(2).strip()
         else:
-            val = p
+            val = chunk.strip()
             typ = "String"
         params.append((val, typ))
     return params
+
+
+def _parse_param_line(line: str, *, has_label: bool = True) -> List[Tuple[str, str]]:
+    """Tách dòng Parameters thành danh sách giá trị + kiểu."""
+    text = ""
+    if has_label:
+        parts = line.split("Parameters:", 1)
+        text = parts[1] if len(parts) > 1 else ""
+    else:
+        if "Parameters:" in line:
+            parts = line.split("Parameters:", 1)
+            text = parts[1] if len(parts) > 1 else ""
+        elif "]" in line:
+            text = line.rsplit("]", 1)[1]
+        else:
+            text = line
+    return _parse_param_text(text)
+
+
+def _collect_param_blocks(
+    lines: Sequence[str],
+    start_index: int,
+    thread: Optional[str],
+) -> List[List[Tuple[str, str]]]:
+    """
+    Gom nhóm các dòng Parameters liên quan tới câu SQL starting tại start_index.
+    Hỗ trợ cả trường hợp nhiều dòng Parameters cùng thuộc một batch insert.
+    """
+    blocks: List[List[Tuple[str, str]]] = []
+    current: List[Tuple[str, str]] = []
+    total = len(lines)
+    j = start_index + 1
+    while j < total:
+        line = lines[j]
+        if "Preparing:" in line and "DEBUG" in line:
+            break
+        if DATE_PREFIX_RE.match(line) and "Parameters:" not in line and not line.strip().startswith((" ", "\t")):
+            # Gặp log mới không phải parameters -> kết thúc block hiện tại
+            if current:
+                blocks.append(current)
+                current = []
+            if thread is None:
+                break
+        if "Parameters:" in line:
+            thr_match = THREAD_RE.search(line)
+            if thread and thr_match and thr_match.group(1) != thread:
+                j += 1
+                continue
+            parsed = _parse_param_line(line, has_label=True)
+            if parsed:
+                if current:
+                    blocks.append(current)
+                current = parsed
+        elif current and line.strip():
+            # Continuation line (không có tiền tố Parameters)
+            continuation = _parse_param_line(line, has_label=False)
+            if continuation:
+                current.extend(continuation)
+        j += 1
+    if current:
+        blocks.append(current)
+    return blocks
 
 def parse_sql(file_path: str) -> List[SqlEntry]:
     """Đọc file log và gom danh sách các câu SQL."""
@@ -119,29 +202,7 @@ def parse_sql(file_path: str) -> List[SqlEntry]:
                 i += 1
                 continue
 
-            # Collect multiple Parameters lines around this Preparing within ±6 lines and same thread
-            window_start = max(0, i - 6)
-            window_end = min(total, i + 7)
-            param_blocks: List[List[Tuple[str, str]]] = []
-            for k in range(window_start, window_end):
-                if k == i:
-                    continue
-                if "Parameters:" in lines[k]:
-                    thr_k = THREAD_RE.search(lines[k])
-                    if thread and thr_k and thr_k.group(1) != thread:
-                        continue
-                    parsed = _parse_param_line(lines[k])
-                    if parsed:
-                        param_blocks.append(parsed)
-
-            # Fallback: at least try to grab the immediate next Parameters if none found
-            if not param_blocks:
-                for j in range(i + 1, min(i + 6, total)):
-                    if "Parameters:" in lines[j]:
-                        parsed = _parse_param_line(lines[j])
-                        if parsed:
-                            param_blocks.append(parsed)
-                        break
+            param_blocks = _collect_param_blocks(lines, i, thread)
 
             # Replace ? with each parameter set
             def replace_placeholders(query: str, parameters: Sequence[Tuple[str, str]]) -> str:
@@ -255,6 +316,8 @@ class LogViewerApp:
         self._apply_icon(self.root)
         self.sql_entries: List[SqlEntry] = []
         self.error_entries: List[ErrorEntry] = []
+        self._visible_count = 0
+        self._total_count = 0
 
         # Language handling
         self._key_map = {
@@ -294,6 +357,22 @@ class LogViewerApp:
             "toggle_param_sql": "log.btn.toggle_param_sql",
             "filters_section": "log.section.filters",
             "results_section": "log.section.results",
+            "file_label": "log.label.file",
+            "open_folder": "log.btn.open_folder",
+            "save_log": "log.btn.save_log",
+            "view_saved_logs": "log.btn.view_saved",
+            "clear": "log.btn.clear",
+            "refresh": "log.btn.refresh",
+            "reset_filters": "log.btn.reset",
+            "summary_status": "log.status.summary",
+            "open_folder_error": "log.msg.open_folder_error",
+            "no_file": "log.msg.no_file",
+            "msg_save_none": "log.msg.save_none",
+            "msg_save_success": "log.msg.save_success",
+            "msg_no_saved_log": "log.msg.no_saved_log",
+            "important_only": "log.label.important_only",
+            "saved_logs_title": "log.dialog.saved_title",
+            "saved_at": "log.column.saved_at",
         }
 
         def _(key: str, **kwargs) -> str:
@@ -313,120 +392,205 @@ class LogViewerApp:
         style.configure("Treeview", borderwidth=0, relief="flat", rowheight=25)
         style.configure("Treeview.Heading", borderwidth=0, relief="flat")
 
-        container = ttk.Frame(root, padding=8)
+        container = ttk.Frame(root, padding=12)
         container.pack(fill="both", expand=True)
         container.columnconfigure(0, weight=1)
+        container.rowconfigure(0, weight=1)
 
-        # ----- UI Setup -----
-        search_frame = ttk.LabelFrame(container, text=self._("filters_section"), padding=8, borderwidth=2, relief="ridge")
-        search_frame.pack(fill="x", pady=(0, 8))
-        self.frm_filters = search_frame
+        self.main_pane = ttk.Panedwindow(container, orient="horizontal")
+        self.main_pane.grid(row=0, column=0, sticky="nsew")
 
-        row1 = tk.Frame(search_frame)
-        row1.pack(fill="x", padx=5, pady=(5, 2))
-        self.btn_choose = tk.Button(row1, text=self._("choose_log"), command=self.choose_file)
-        self.btn_choose.pack(side="left", padx=(0, 5))
-        self.lbl_log_type = tk.Label(row1, text=self._("log_type"))
-        self.lbl_log_type.pack(side="left", padx=(10, 5))
+        filter_side = ttk.Frame(self.main_pane, padding=(12, 12))
+        filter_side.columnconfigure(0, weight=1)
+        filter_side.rowconfigure(0, weight=1)
+        self.main_pane.add(filter_side, weight=1)
+
+        content_side = ttk.Frame(self.main_pane, padding=(12, 12))
+        content_side.columnconfigure(0, weight=1)
+        content_side.rowconfigure(2, weight=1)
+        self.main_pane.add(content_side, weight=4)
+
+        # ----- Filter panel -----
+        self.frm_filters = ttk.LabelFrame(filter_side, text=self._("filters_section"), padding=10)
+        self.frm_filters.grid(row=0, column=0, sticky="nsew")
+        self.frm_filters.columnconfigure(1, weight=1)
+
+        controls_row = ttk.Frame(self.frm_filters)
+        controls_row.grid(row=0, column=0, columnspan=2, sticky="ew")
+        controls_row.columnconfigure(0, weight=1)
+        self.btn_choose = ttk.Button(controls_row, text=self._("choose_log"), command=self.choose_file)
+        self.btn_choose.grid(row=0, column=0, sticky="ew")
+        self.btn_refresh = ttk.Button(controls_row, text=self._("refresh"), command=self.refresh_file)
+        self.btn_refresh.grid(row=0, column=1, padx=(6, 0))
+        self.btn_reset_filters = ttk.Button(controls_row, text=self._("reset_filters"), command=self.reset_filters)
+        self.btn_reset_filters.grid(row=0, column=2, padx=(6, 0))
+
+        ttk.Separator(self.frm_filters).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 8))
+
+        row_index = 2
+
+        self.lbl_log_type = ttk.Label(self.frm_filters, text=self._("log_type"))
+        self.lbl_log_type.grid(row=row_index, column=0, sticky="w")
+        type_frame = ttk.Frame(self.frm_filters)
+        type_frame.grid(row=row_index, column=1, sticky="w")
         self.log_type_var = tk.StringVar(value="SQL")
-        self.rb_sql = tk.Radiobutton(row1, text=self._("sql"), variable=self.log_type_var, value="SQL", command=self.update_filters)
-        self.rb_sql.pack(side="left", padx=(0, 5))
-        self.rb_error = tk.Radiobutton(row1, text=self._("error"), variable=self.log_type_var, value="ERROR", command=self.update_filters)
-        self.rb_error.pack(side="left", padx=(0, 5))
+        self.rb_sql = ttk.Radiobutton(type_frame, text=self._("sql"), variable=self.log_type_var, value="SQL", command=self.update_filters)
+        self.rb_sql.pack(side="left", padx=(0, 6))
+        self.rb_error = ttk.Radiobutton(type_frame, text=self._("error"), variable=self.log_type_var, value="ERROR", command=self.update_filters)
+        self.rb_error.pack(side="left")
+        row_index += 1
 
-        row_screen = tk.Frame(search_frame)
-        row_screen.pack(fill="x", padx=5, pady=(5, 2))
-        self.lbl_screen = tk.Label(row_screen, text=self._("screen"), width=10, anchor="w")
-        self.lbl_screen.pack(side="left", padx=(0, 5))
+        self.lbl_screen = ttk.Label(self.frm_filters, text=self._("screen"))
+        self.lbl_screen.grid(row=row_index, column=0, sticky="w", padx=(0, 6), pady=(6, 2))
+        screen_frame = ttk.Frame(self.frm_filters)
+        screen_frame.grid(row=row_index, column=1, sticky="ew", pady=(6, 2))
+        screen_frame.columnconfigure(0, weight=1)
         self.screen_var = tk.StringVar(value="ALL")
-        self.combo_screen = ttk.Combobox(row_screen, textvariable=self.screen_var, values=["ALL"], state="readonly", width=12)
-        self.combo_screen.bind("<<ComboboxSelected>>", lambda e: self.refresh_table())
-        self.combo_screen.pack(side="left", padx=(0, 5))
-        self.btn_refresh = tk.Button(row_screen, text="⟳", width=3, command=self.refresh_file)
-        self.btn_refresh.pack(side="right", padx=(5, 0))
+        self.combo_screen = ttk.Combobox(screen_frame, textvariable=self.screen_var, values=["ALL"], state="readonly")
+        self.combo_screen.grid(row=0, column=0, sticky="ew")
+        self.combo_screen.configure(takefocus=True)
+        self.combo_screen.bind("<<ComboboxSelected>>", lambda _e: self.refresh_table())
+        row_index += 1
 
-        row_cmd = tk.Frame(search_frame)
-        row_cmd.pack(fill="x", padx=5, pady=(2, 5))
         self.sql_command_var = tk.StringVar(value="ALL")
-        self.sql_command_frame = tk.Frame(row_cmd)
-        self.lbl_cmd = tk.Label(self.sql_command_frame, text=self._("command_type"), width=10, anchor="w")
-        self.lbl_cmd.pack(side="left", padx=(0, 5))
-        self.cmd_buttons = []
-        for cmd in ["ALL", "SELECT", "INSERT", "UPDATE", "DELETE"]:
-            btn = tk.Radiobutton(row_cmd, text=cmd, variable=self.sql_command_var, value=cmd, command=self.refresh_table)
-            btn.pack(side="left", padx=(0, 5))
+        self.sql_command_row = ttk.Frame(self.frm_filters)
+        self.sql_command_row.grid(row=row_index, column=0, columnspan=2, sticky="ew", pady=(6, 2))
+        self.sql_command_row.columnconfigure(1, weight=1)
+        self.lbl_cmd = ttk.Label(self.sql_command_row, text=self._("command_type"))
+        self.lbl_cmd.grid(row=0, column=0, sticky="nw", padx=(0, 6))
+        commands_frame = ttk.Frame(self.sql_command_row)
+        commands_frame.grid(row=0, column=1, sticky="nw")
+        self.cmd_buttons: List[ttk.Radiobutton] = []
+        for idx, cmd in enumerate(["ALL", "SELECT", "INSERT", "UPDATE", "DELETE"]):
+            btn = ttk.Radiobutton(commands_frame, text=cmd, variable=self.sql_command_var, value=cmd, command=self.refresh_table)
+            btn.grid(row=idx, column=0, sticky="w", pady=1)
             self.cmd_buttons.append(btn)
-        self.sql_command_frame.pack(side="left")
+        row_index += 1
 
-        # Row for keyword search
-        row_search = tk.Frame(search_frame)
-        row_search.pack(fill="x", padx=5, pady=(2, 5))
-        self.lbl_keyword = tk.Label(row_search, text=self._("keyword"), width=10, anchor="w")
-        self.lbl_keyword.pack(side="left", padx=(0, 5))
+        self.search_row = ttk.Frame(self.frm_filters)
+        self.search_row.grid(row=row_index, column=0, columnspan=2, sticky="ew", pady=(6, 2))
+        self.search_row.columnconfigure(1, weight=1)
+        self.lbl_keyword = ttk.Label(self.search_row, text=self._("keyword"))
+        self.lbl_keyword.grid(row=0, column=0, sticky="w", padx=(0, 6))
         self.search_var = tk.StringVar()
-        self.entry_search = tk.Entry(row_search, textvariable=self.search_var, width=20)
-        self.entry_search.pack(side="left", padx=(0, 5))
-        self.btn_search = tk.Button(row_search, text=self._("search_btn"), command=self.perform_search)
-        self.btn_search.pack(side="left", padx=(0, 15))
+        self.entry_search = ttk.Entry(self.search_row, textvariable=self.search_var, width=28)
+        self.entry_search.grid(row=0, column=1, sticky="ew")
+        btn_search_frame = ttk.Frame(self.search_row)
+        btn_search_frame.grid(row=0, column=2, sticky="w", padx=(8, 0))
+        self.btn_search = ttk.Button(btn_search_frame, text=self._("search_btn"), command=self.perform_search)
+        self.btn_search.pack(side="left")
+        self.btn_clear_search = ttk.Button(btn_search_frame, text=self._("clear"), command=self.clear_search)
+        self.btn_clear_search.pack(side="left", padx=(6, 0))
+        row_index += 1
+
+        self.time_row = ttk.Frame(self.frm_filters)
+        self.time_row.grid(row=row_index, column=0, columnspan=2, sticky="ew", pady=(6, 2))
+        self.time_row.columnconfigure(1, weight=1)
+        self.lbl_time_display = ttk.Label(self.time_row, text=self._("time_display"))
+        self.lbl_time_display.grid(row=0, column=0, sticky="nw", padx=(0, 6))
+        time_options = ttk.Frame(self.time_row)
+        time_options.grid(row=0, column=1, sticky="nw")
         self.time_format_var = tk.StringVar(value="full")
-        self.lbl_time_display = tk.Label(row_search, text=self._("time_display"), anchor="w")
-        self.lbl_time_display.pack(side="left", padx=(0, 5))
-        self.rb_time_full = tk.Radiobutton(row_search, text=self._("time_format_full"), variable=self.time_format_var, value="full", command=self.refresh_table)
-        self.rb_time_full.pack(side="left", padx=(0, 5))
-        self.rb_time_time = tk.Radiobutton(row_search, text=self._("time_format_time"), variable=self.time_format_var, value="time", command=self.refresh_table)
-        self.rb_time_time.pack(side="left", padx=(0, 5))
+        self.rb_time_full = ttk.Radiobutton(time_options, text=self._("time_format_full"), variable=self.time_format_var, value="full", command=self.refresh_table)
+        self.rb_time_full.grid(row=0, column=0, sticky="w")
+        self.rb_time_time = ttk.Radiobutton(time_options, text=self._("time_format_time"), variable=self.time_format_var, value="time", command=self.refresh_table)
+        self.rb_time_time.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        row_index += 1
 
-        # Row for parameter display toggle (Hiện/Ẩn)
-        row_param = tk.Frame(search_frame)
-        row_param.pack(fill="x", padx=5, pady=(2, 5))
-        self.lbl_param_display = tk.Label(row_param, text=self._("param_display"), width=10, anchor="w")
-        self.lbl_param_display.pack(side="left", padx=(0, 5))
-        self.param_display_var = tk.StringVar(value="hide")  # default Ẩn
-        self.rb_param_show = tk.Radiobutton(row_param, text=self._("param_show"), variable=self.param_display_var, value="show", command=self.refresh_table)
-        self.rb_param_show.pack(side="left", padx=(0, 5))
-        self.rb_param_hide = tk.Radiobutton(row_param, text=self._("param_hide"), variable=self.param_display_var, value="hide", command=self.refresh_table)
-        self.rb_param_hide.pack(side="left", padx=(0, 5))
+        self.show_params_var = tk.BooleanVar(value=False)
+        self.param_row = ttk.Frame(self.frm_filters)
+        self.param_row.grid(row=row_index, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        self.param_row.columnconfigure(1, weight=1)
+        self.lbl_param_display = ttk.Label(self.param_row, text=self._("param_display"))
+        self.lbl_param_display.grid(row=0, column=0, sticky="nw", padx=(0, 6))
+        self.chk_params = ttk.Checkbutton(self.param_row, variable=self.show_params_var, command=self.on_toggle_params)
+        self.chk_params.grid(row=0, column=1, sticky="w")
+        self._update_param_check_text()
 
-        # ----- Treeview Setup -----
-        columns_sql = ("screen", "timestamp", "command", "function", "params", "sql")
-        self.columns_sql = columns_sql
-        tree_frame = ttk.LabelFrame(container, text=self._("results_section"), padding=6, borderwidth=2, relief="ridge")
-        tree_frame.pack(fill="both", expand=True, pady=(0, 8))
+        self.important_only_var = tk.BooleanVar(value=False)
+        self.important_row = ttk.Frame(self.frm_filters)
+        self.important_row.grid(row=row_index + 1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        self.important_row.columnconfigure(1, weight=1)
+        self.lbl_important = ttk.Label(self.important_row, text=self._("important_only"))
+        self.lbl_important.grid(row=0, column=0, sticky="nw", padx=(0, 6))
+        self.chk_important = ttk.Checkbutton(self.important_row, variable=self.important_only_var, command=self.on_toggle_important)
+        self.chk_important.grid(row=0, column=1, sticky="w")
+        row_index += 2
+
+        # ----- Content panel -----
+        self.file_path_var = tk.StringVar(value=self._("no_file"))
+        self.summary_var = tk.StringVar(value=self._("msg.no_results"))
+        self._refresh_file_label()
+
+        header = ttk.Frame(content_side)
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(1, weight=1)
+        self.lbl_file_caption = ttk.Label(header, text=self._("file_label"))
+        self.lbl_file_caption.grid(row=0, column=0, sticky="w")
+        self.lbl_file_path = ttk.Label(header, textvariable=self.file_path_var, wraplength=480, justify="left")
+        self.lbl_file_path.grid(row=0, column=1, sticky="w", padx=(6, 0))
+        self.btn_bar = ttk.Frame(header)
+        self.btn_bar.grid(row=0, column=2, sticky="e")
+        self.btn_saved_logs = ttk.Button(self.btn_bar, text=self._("view_saved_logs"), command=self.show_saved_logs, state="disabled")
+        self.btn_save_log = ttk.Button(self.btn_bar, text=self._("save_log"), command=self.save_selected_logs, state="disabled")
+        self.btn_open_folder = ttk.Button(self.btn_bar, text=self._("open_folder"), command=self.open_current_folder)
+        self.lbl_summary = ttk.Label(header, textvariable=self.summary_var, anchor="w")
+        self.lbl_summary.grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+        ttk.Separator(content_side).grid(row=1, column=0, sticky="ew", pady=(8, 8))
+
+        self._sql_columns_full: Tuple[str, ...] = ("mark", "screen", "timestamp", "command", "function", "params", "sql")
+        self._sql_columns_important: Tuple[str, ...] = ("mark", "screen", "timestamp", "params", "sql")
+        self.error_columns: Tuple[str, ...] = ("timestamp", "screen", "summary")
+        self._column_meta: dict[str, dict[str, Any]] = {
+            "mark": {"heading": "", "width": 44, "stretch": False, "anchor": "center"},
+            "screen": {"heading": "screen_id", "width": 120, "stretch": False},
+            "timestamp": {"heading": "time", "width": 160, "stretch": False},
+            "command": {"heading": "command", "width": 110, "stretch": False},
+            "function": {"heading": "function", "width": 160, "stretch": False},
+            "params": {"heading": "params", "width": 240, "stretch": False},
+            "sql": {"heading": "sql_filled", "width": 540, "stretch": True},
+            "summary": {"heading": "summary", "width": 260, "stretch": True},
+        }
+        self._mark_symbol = "✓"
+        self._marked_keys: set[str] = set()
+        self._item_to_key: dict[str, str] = {}
+        self._entry_by_key: dict[str, SqlEntry] = {}
+        self._saved_logs: List[dict[str, Any]] = []
+
+        tree_frame = ttk.LabelFrame(content_side, text=self._("results_section"), padding=6, borderwidth=2, relief="ridge")
+        tree_frame.grid(row=2, column=0, sticky="nsew")
+        tree_frame.columnconfigure(0, weight=1)
+        tree_frame.rowconfigure(0, weight=1)
         self.frm_results = tree_frame
-        scroll_y = tk.Scrollbar(tree_frame, orient="vertical")
-        scroll_y.pack(side="right", fill="y")
-        scroll_x = tk.Scrollbar(tree_frame, orient="horizontal")
-        scroll_x.pack(side="bottom", fill="x")
+
+        scroll_y = ttk.Scrollbar(tree_frame, orient="vertical")
+        scroll_y.grid(row=0, column=1, sticky="ns")
+        scroll_x = ttk.Scrollbar(tree_frame, orient="horizontal")
+        scroll_x.grid(row=1, column=0, sticky="ew")
         self.border_frame = tk.Frame(tree_frame, bd=1, relief="solid")
-        self.border_frame.pack(fill="both", expand=True)
+        self.border_frame.grid(row=0, column=0, sticky="nsew")
+        self.border_frame.columnconfigure(0, weight=1)
+        self.border_frame.rowconfigure(0, weight=1)
         self.tree = ttk.Treeview(
             self.border_frame,
-            columns=columns_sql,
+            columns=(),
             show="headings",
             yscrollcommand=scroll_y.set,
             xscrollcommand=scroll_x.set,
         )
-        heading_keys = ["screen_id", "time", "command", "function", "params", "sql_filled"]
-        for col, key in zip(columns_sql, heading_keys):
-            self.tree.heading(col, text=self._(key))
-            if col == "sql":
-                width = 500; stretch = True
-            elif col == "params":
-                width = 200; stretch = False
-            elif col == "function":
-                width = 150; stretch = False
-            elif col == "command":
-                width = 80; stretch = False
-            elif col == "timestamp":
-                width = 130; stretch = False
-            else:
-                width = 100; stretch = False
-            self.tree.column(col, width=width, stretch=stretch)
-        self.tree.pack(fill="both", expand=True)
+        self._configure_tree_columns()
+        self.tree.grid(row=0, column=0, sticky="nsew")
         scroll_y.config(command=self.tree.yview)
         scroll_x.config(command=self.tree.xview)
-        self.error_columns = ("timestamp", "screen", "summary", "details")
+        self.empty_label = ttk.Label(self.border_frame, text=self._("msg.no_results"), anchor="center")
+        self.empty_label.place_forget()
+        self.tree.bind("<Button-1>", self._on_tree_click, add="+")
+        self.entry_search.bind("<Return>", lambda _e: self.perform_search())
+        self.root.bind_all("<Control-f>", self.focus_search_entry)
         self.tree.bind("<Double-1>", self.on_double_click)
+        self._show_sql_actions()
+        self._update_action_buttons()
 
         # Global copy: Ctrl+C copies selected rows, or all rows if none selected.
         self.root.bind_all("<Control-c>", self.copy_all_or_selected)
@@ -453,34 +617,54 @@ class LogViewerApp:
         if hasattr(self, "frm_results"):
             self.frm_results.configure(text=_("results_section"))
         self.btn_choose.configure(text=_("choose_log"))
+        self.btn_refresh.configure(text=_("refresh"))
+        self.btn_reset_filters.configure(text=_("reset_filters"))
+        self.btn_save_log.configure(text=_("save_log"))
+        self.btn_saved_logs.configure(text=_("view_saved_logs"))
+        self.btn_open_folder.configure(text=_("open_folder"))
         self.lbl_log_type.configure(text=_("log_type"))
         self.rb_sql.configure(text=_("sql"))
         self.rb_error.configure(text=_("error"))
         self.lbl_cmd.configure(text=_("command_type"))
         self.lbl_screen.configure(text=_("screen"))
-        if self.log_type_var.get() == "SQL":
-            self.tree.heading("screen", text=_("screen_id"))
-            self.tree.heading("timestamp", text=_("time"))
-            self.tree.heading("command", text=_("command"))
-            self.tree.heading("function", text=_("function"))
-            self.tree.heading("params", text=_("params"))
-            self.tree.heading("sql", text=_("sql_filled"))
-        else:
-            self.tree.heading("timestamp", text=_("time"))
-            self.tree.heading("screen", text=_("screen_id"))
-            self.tree.heading("summary", text=_("summary"))
         self.lbl_keyword.configure(text=_("keyword"))
         self.btn_search.configure(text=_("search_btn"))
+        self.btn_clear_search.configure(text=_("clear"))
         self.lbl_time_display.configure(text=_("time_display"))
         self.rb_time_full.configure(text=_("time_format_full"))
         self.rb_time_time.configure(text=_("time_format_time"))
         self.lbl_param_display.configure(text=_("param_display"))
-        self.rb_param_show.configure(text=_("param_show"))
-        self.rb_param_hide.configure(text=_("param_hide"))
+        self._update_param_check_text()
+        self.lbl_important.configure(text=_("important_only"))
+        self.lbl_file_caption.configure(text=_("file_label"))
+        self.empty_label.configure(text=_("msg.no_results"))
+        self._configure_tree_columns()
+        self._refresh_file_label()
+        self._update_summary_label()
 
     def _handle_language_change(self, _: str) -> None:
         """Lắng nghe thay đổi ngôn ngữ từ i18n."""
         self._apply_language()
+
+    def _get_active_columns(self) -> Tuple[str, ...]:
+        if self.log_type_var.get() == "SQL":
+            return self._sql_columns_important if self.important_only_var.get() else self._sql_columns_full
+        return self.error_columns
+
+    def _configure_tree_columns(self) -> None:
+        if not hasattr(self, "tree"):
+            return
+        cols = self._get_active_columns()
+        self.tree.configure(columns=cols)
+        for col in cols:
+            meta = self._column_meta.get(col, {})
+            heading_key = meta.get("heading")
+            heading_text = "" if not heading_key else self._(heading_key)
+            self.tree.heading(col, text=heading_text)
+            width = meta.get("width", 120)
+            stretch = meta.get("stretch", False)
+            anchor = meta.get("anchor", "w")
+            self.tree.column(col, width=width, stretch=stretch, anchor=anchor)
 
     def refresh_file(self) -> None:
         """Tải lại log đang mở nếu có."""
@@ -498,6 +682,7 @@ class LogViewerApp:
                 parent=self.root,
             )
             return
+        self._refresh_file_label()
         screens = sorted({entry.screen_id for entry in self.sql_entries + self.error_entries if entry.screen_id})
         self.combo_screen.configure(values=["ALL"] + screens)
         if self.screen_var.get() not in self.combo_screen["values"]:
@@ -527,39 +712,52 @@ class LogViewerApp:
         self.combo_screen.configure(values=["ALL"] + screens)
         self.screen_var.set("ALL")
         self.current_file = file_path
+        self._refresh_file_label()
         self.refresh_table()
 
     def update_filters(self) -> None:
         """Điều chỉnh bố cục và tiêu đề khi đổi loại log (SQL/ERROR)."""
-        if self.log_type_var.get() == "SQL":
-            self.sql_command_frame.pack(side="left")
-            self.tree.configure(columns=("screen", "timestamp", "command", "function", "params", "sql"))
-            self.tree.column("screen", width=100, stretch=False)
-            self.tree.column("timestamp", width=130, stretch=False)
-            self.tree.column("command", width=80, stretch=False)
-            self.tree.column("function", width=150, stretch=False)
-            self.tree.column("params", width=200, stretch=False)
-            self.tree.column("sql", width=500, stretch=True)
+        if not hasattr(self, "tree"):
+            return
+        is_sql = self.log_type_var.get() == "SQL"
+        if is_sql:
+            self.sql_command_row.grid()
+            self.param_row.grid()
+            self.important_row.grid()
+            self._show_sql_actions()
         else:
-            self.sql_command_frame.pack_forget()
-            self.tree.configure(columns=("timestamp", "screen", "summary"))
-            self.tree.column("timestamp", width=130, stretch=False)
-            self.tree.column("screen", width=100, stretch=False)
-            self.tree.column("summary", width=600, stretch=True)
+            self.sql_command_row.grid_remove()
+            self.param_row.grid_remove()
+            self.important_row.grid_remove()
+            self._hide_sql_actions()
+            if self.show_params_var.get():
+                self.show_params_var.set(False)
+                self._update_param_check_text()
+            if self.important_only_var.get():
+                self.important_only_var.set(False)
+        self._configure_tree_columns()
+        self._update_action_buttons()
         self._apply_language()
         self.refresh_table()
 
     def refresh_table(self) -> None:
         """Làm mới bảng kết quả theo bộ lọc hiện tại."""
+        if not hasattr(self, "tree"):
+            return
         for row in self.tree.get_children():
             self.tree.delete(row)
         selected_screen = self.screen_var.get()
         search_term = self.search_var.get().strip().lower()
+        is_sql = self.log_type_var.get() == "SQL"
+        columns = self._get_active_columns()
         self.row_to_entry.clear()
+        self._item_to_key = {}
         row_index = 0
 
-        if self.log_type_var.get() == "SQL":
+        if is_sql:
             command_filter = self.sql_command_var.get()
+            self._entry_by_key = {}
+            self._total_count = len(self.sql_entries)
             for entry in self.sql_entries:
                 if selected_screen != "ALL" and entry.screen_id != selected_screen:
                     continue
@@ -573,53 +771,43 @@ class LogViewerApp:
                         ts_display = ts
                 else:
                     ts_display = ts
-                # Decide whether to display parameters or ***
-                if self.param_display_var.get() == "hide":
-                    param_str_display = "***"
-                else:
-                    param_str_display = ", ".join(entry.params)
-                row_values = [entry.screen_id or "", ts_display, entry.sql_type, entry.function, param_str_display, entry.sql]
-                include_row = False if search_term else True
+                param_str_display = "***" if not self.show_params_var.get() else ", ".join(entry.params)
+                row_lookup = [entry.screen_id or "", ts_display, entry.sql_type, entry.function, param_str_display, entry.sql]
+                include_row = not search_term
                 tag_match = False
                 if search_term:
-                    for v in row_values:
+                    for v in row_lookup:
                         if v and search_term in str(v).lower():
                             include_row = True
                             tag_match = True
                             break
                 if not include_row:
                     continue
+                key = self._build_entry_key(entry)
+                self._entry_by_key[key] = entry
+                mark_value = self._mark_symbol if key in self._marked_keys else ""
+                row_map = {
+                    "mark": mark_value,
+                    "screen": entry.screen_id or "",
+                    "timestamp": ts_display,
+                    "command": entry.sql_type,
+                    "function": entry.function,
+                    "params": param_str_display,
+                    "sql": entry.sql,
+                }
+                row_values = tuple(row_map.get(col, "") for col in columns)
                 row_tag = "even_row" if row_index % 2 == 0 else "odd_row"
                 tags = [row_tag]
                 if tag_match:
                     tags.append("match")
-                item_id = self.tree.insert("", "end", values=tuple(row_values), tags=tuple(tags))
+                item_id = self.tree.insert("", "end", values=row_values, tags=tuple(tags))
                 self.row_to_entry[item_id] = entry
+                self._item_to_key[item_id] = key
                 row_index += 1
-            max_lengths = {
-                "screen": len(self._("screen_id")),
-                "timestamp": len(self._("time")),
-                "command": len(self._("command")),
-                "function": len(self._("function")),
-                "params": len(self._("params")),
-            }
-            for row_id in self.tree.get_children():
-                vals = self.tree.item(row_id, "values")
-                if not vals:
-                    continue
-                col_names = ["screen", "timestamp", "command", "function", "params"]
-                for idx, col in enumerate(col_names):
-                    if idx < len(vals):
-                        length = len(str(vals[idx]))
-                        if length > max_lengths[col]:
-                            max_lengths[col] = length
-            char_w = 7
-            self.tree.column("screen", width=max(80, max_lengths["screen"] * char_w), stretch=False)
-            self.tree.column("timestamp", width=max(100, max_lengths["timestamp"] * char_w), stretch=False)
-            self.tree.column("command", width=max(70, max_lengths["command"] * char_w), stretch=False)
-            self.tree.column("function", width=max(100, max_lengths["function"] * char_w), stretch=False)
-            self.tree.column("params", width=200, stretch=False)
+            self._marked_keys.intersection_update(set(self._entry_by_key.keys()))
         else:
+            self._total_count = len(self.error_entries)
+            self._marked_keys.clear()
             for entry in self.error_entries:
                 if selected_screen != "ALL" and entry.screen_id != selected_screen:
                     continue
@@ -631,44 +819,278 @@ class LogViewerApp:
                         ts_display = ts
                 else:
                     ts_display = ts
-                row_values = [ts_display, entry.screen_id or "", entry.summary, entry.details]
-                include_row = False if search_term else True
+                row_values_all = [ts_display, entry.screen_id or "", entry.summary, entry.details]
+                include_row = not search_term
                 tag_match = False
                 if search_term:
-                    for v in row_values:
+                    for v in row_values_all:
                         if v and search_term in str(v).lower():
                             include_row = True
                             tag_match = True
                             break
                 if not include_row:
                     continue
-                display_values = [ts_display, entry.screen_id or "", entry.summary]
+                display_values = (row_values_all[0], row_values_all[1], row_values_all[2])
                 row_tag = "even_row" if row_index % 2 == 0 else "odd_row"
                 tags = [row_tag]
                 if tag_match:
                     tags.append("match")
-                item_id = self.tree.insert("", "end", values=tuple(display_values), tags=tuple(tags))
+                item_id = self.tree.insert("", "end", values=display_values, tags=tuple(tags))
                 self.row_to_entry[item_id] = entry
                 row_index += 1
-            max_lengths = {
-                "timestamp": len(self._("time")),
-                "screen": len(self._("screen_id")),
-                "summary": len(self._("summary")),
-            }
-            for row_id in self.tree.get_children():
-                vals = self.tree.item(row_id, "values")
-                if not vals:
-                    continue
-                names = ["timestamp", "screen", "summary"]
-                for idx, name in enumerate(names):
-                    if idx < len(vals):
-                        l = len(str(vals[idx]))
-                        if l > max_lengths[name]:
-                            max_lengths[name] = l
-            char_w = 7
-            self.tree.column("timestamp", width=max(100, max_lengths["timestamp"] * char_w), stretch=False)
-            self.tree.column("screen", width=max(80, max_lengths["screen"] * char_w), stretch=False)
-            self.tree.column("summary", width=max(200, max_lengths["summary"] * char_w), stretch=True)
+
+        self._visible_count = row_index
+        self._update_empty_state(row_index > 0)
+        self._update_summary_label()
+        self._update_action_buttons()
+
+    def clear_search(self) -> None:
+        """Xóa từ khóa tìm kiếm và làm mới kết quả."""
+        if self.search_var.get():
+            self.search_var.set("")
+            self.refresh_table()
+        self.entry_search.focus_set()
+
+    def reset_filters(self) -> None:
+        """Đặt lại toàn bộ bộ lọc về trạng thái mặc định."""
+        self.log_type_var.set("SQL")
+        self.sql_command_var.set("ALL")
+        self.screen_var.set("ALL")
+        self.search_var.set("")
+        self.time_format_var.set("full")
+        if self.show_params_var.get():
+            self.show_params_var.set(False)
+        self._update_param_check_text()
+        if self.important_only_var.get():
+            self.important_only_var.set(False)
+        self.update_filters()
+        self.entry_search.focus_set()
+
+    def focus_search_entry(self, _event=None) -> str:
+        """Đưa focus vào ô tìm kiếm khi người dùng nhấn Ctrl+F."""
+        try:
+            self.entry_search.focus_set()
+            self.entry_search.select_range(0, tk.END)
+        except Exception:
+            pass
+        return "break"
+
+    def open_current_folder(self) -> None:
+        """Mở thư mục chứa file log đang xem."""
+        path = getattr(self, "current_file", "") or ""
+        if not path:
+            messagebox.showinfo(i18n.translate(APP_TITLE_KEY), self._("no_file"), parent=self.root)
+            return
+        folder = os.path.dirname(path)
+        if not folder or not os.path.isdir(folder):
+            messagebox.showerror(i18n.translate(APP_TITLE_KEY), self._("open_folder_error", error=self._("no_file")), parent=self.root)
+            return
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(folder)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", folder])
+            else:
+                subprocess.Popen(["xdg-open", folder])
+        except Exception as exc:
+            messagebox.showerror(i18n.translate(APP_TITLE_KEY), self._("open_folder_error", error=str(exc)), parent=self.root)
+
+    def _format_path(self, path: str) -> str:
+        if not path:
+            return self._("no_file")
+        normalized = os.path.normpath(path)
+        if len(normalized) <= 90:
+            return normalized
+        return "..." + normalized[-87:]
+
+    def _refresh_file_label(self) -> None:
+        display = self._format_path(getattr(self, "current_file", "") or "")
+        self.file_path_var.set(display)
+
+    def _update_empty_state(self, has_rows: bool) -> None:
+        if has_rows:
+            self.empty_label.place_forget()
+        else:
+            self.empty_label.configure(text=self._("msg.no_results"))
+            self.empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            self.empty_label.lift()
+
+    def _update_summary_label(self) -> None:
+        if not getattr(self, "current_file", None):
+            self.summary_var.set(self._("no_file"))
+            return
+        total = self._total_count
+        visible = self._visible_count
+        if total <= 0:
+            self.summary_var.set(self._("msg.no_results"))
+            return
+        summary = self._("summary_status", visible=visible, total=total)
+        if visible == 0 and total > 0:
+            summary = f"{summary} | {self._('msg.no_results')}"
+        self.summary_var.set(summary)
+
+    def on_toggle_params(self) -> None:
+        """Đổi trạng thái hiển thị tham số và làm mới bảng."""
+        self._update_param_check_text()
+        self.refresh_table()
+
+    def on_toggle_important(self) -> None:
+        """Bật/tắt chế độ chỉ hiển thị cột quan trọng."""
+        if self.log_type_var.get() != "SQL":
+            self.important_only_var.set(False)
+            return
+        self._configure_tree_columns()
+        self.refresh_table()
+
+    def _update_param_check_text(self) -> None:
+        if not hasattr(self, "chk_params"):
+            return
+        text = self._("param_show") if self.show_params_var.get() else self._("param_hide")
+        try:
+            self.chk_params.configure(text=text)
+        except tk.TclError:
+            pass
+
+    def _show_sql_actions(self) -> None:
+        if hasattr(self, "btn_open_folder"):
+            self.btn_open_folder.pack_forget()
+            self.btn_save_log.pack_forget()
+            self.btn_saved_logs.pack_forget()
+            self.btn_saved_logs.pack(side="right")
+            self.btn_save_log.pack(side="right", padx=(6, 0))
+            self.btn_open_folder.pack(side="right", padx=(6, 0))
+
+    def _hide_sql_actions(self) -> None:
+        if hasattr(self, "btn_save_log"):
+            self.btn_save_log.pack_forget()
+            self.btn_saved_logs.pack_forget()
+            if not self.btn_open_folder.winfo_manager():
+                self.btn_open_folder.pack(side="right", padx=(6, 0))
+
+    def _update_action_buttons(self) -> None:
+        if not hasattr(self, "btn_save_log"):
+            return
+        is_sql = self.log_type_var.get() == "SQL"
+        if not is_sql:
+            self.btn_save_log.state(["disabled"])
+            self.btn_saved_logs.state(["disabled"])
+            return
+        if self._marked_keys:
+            self.btn_save_log.state(["!disabled"])
+        else:
+            self.btn_save_log.state(["disabled"])
+        if self._saved_logs:
+            self.btn_saved_logs.state(["!disabled"])
+        else:
+            self.btn_saved_logs.state(["disabled"])
+
+    def _build_entry_key(self, entry: SqlEntry) -> str:
+        params_key = "|".join(entry.params)
+        return "||".join([
+            entry.timestamp or "",
+            entry.screen_id or "",
+            entry.sql_type,
+            entry.function,
+            entry.sql,
+            params_key,
+        ])
+
+    def _on_tree_click(self, event: tk.Event):
+        if self.log_type_var.get() != "SQL":
+            return
+        region = self.tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        column_id = self.tree.identify_column(event.x)
+        try:
+            column_index = int(column_id[1:]) - 1
+        except (ValueError, TypeError):
+            return
+        columns = self.tree["columns"]
+        if column_index < 0 or column_index >= len(columns) or columns[column_index] != "mark":
+            return
+        item_id = self.tree.identify_row(event.y)
+        if not item_id:
+            return
+        self.tree.selection_set(item_id)
+        self.tree.focus(item_id)
+        self._toggle_mark(item_id)
+        return "break"
+
+    def _toggle_mark(self, item_id: str) -> None:
+        key = self._item_to_key.get(item_id)
+        if not key:
+            return
+        if key in self._marked_keys:
+            self._marked_keys.remove(key)
+            symbol = ""
+        else:
+            self._marked_keys.add(key)
+            symbol = self._mark_symbol
+        if "mark" in self.tree["columns"]:
+            self.tree.set(item_id, "mark", symbol)
+        self._update_action_buttons()
+
+    def save_selected_logs(self) -> None:
+        if self.log_type_var.get() != "SQL":
+            return
+        selected_keys = [key for key in self._marked_keys if key in self._entry_by_key]
+        if not selected_keys:
+            messagebox.showinfo(i18n.translate(APP_TITLE_KEY), self._("msg_save_none"), parent=self.root)
+            return
+        for key in selected_keys:
+            entry = self._entry_by_key.get(key)
+            if not entry:
+                continue
+            self._saved_logs.append({"saved_at": datetime.now(), "entry": entry})
+        self._marked_keys.difference_update(selected_keys)
+        self.refresh_table()
+        self._update_action_buttons()
+        messagebox.showinfo(i18n.translate(APP_TITLE_KEY), self._("msg_save_success", count=len(selected_keys)), parent=self.root)
+
+    def show_saved_logs(self) -> None:
+        if not self._saved_logs:
+            messagebox.showinfo(i18n.translate(APP_TITLE_KEY), self._("msg_no_saved_log"), parent=self.root)
+            return
+        win = tk.Toplevel(self.root)
+        win.title(self._("saved_logs_title"))
+        win.geometry("980x420")
+        try:
+            self._apply_icon(win)
+        except Exception:
+            pass
+        frame = ttk.Frame(win, padding=10)
+        frame.pack(fill="both", expand=True)
+        columns = ("saved_at", "screen", "timestamp", "command", "function", "params", "sql")
+        tree = ttk.Treeview(frame, columns=columns, show="headings")
+        tree.heading("saved_at", text=self._("saved_at"))
+        tree.heading("screen", text=self._("screen_id"))
+        tree.heading("timestamp", text=self._("time"))
+        tree.heading("command", text=self._("command"))
+        tree.heading("function", text=self._("function"))
+        tree.heading("params", text=self._("params"))
+        tree.heading("sql", text=self._("sql_filled"))
+        tree.column("saved_at", width=160, stretch=False)
+        tree.column("screen", width=110, stretch=False)
+        tree.column("timestamp", width=140, stretch=False)
+        tree.column("command", width=90, stretch=False)
+        tree.column("function", width=150, stretch=False)
+        tree.column("params", width=220, stretch=False)
+        tree.column("sql", width=380, stretch=True)
+        tree.pack(fill="both", expand=True)
+        scry = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        scry.pack(side="right", fill="y")
+        tree.configure(yscrollcommand=scry.set)
+        for record in self._saved_logs:
+            entry = record["entry"]
+            saved_at = record["saved_at"].strftime("%Y-%m-%d %H:%M:%S")
+            params_text = ", ".join(entry.params)
+            tree.insert(
+                "",
+                "end",
+                values=(saved_at, entry.screen_id or "", entry.timestamp, entry.sql_type, entry.function, params_text, entry.sql),
+            )
+        ttk.Button(frame, text=self._("close"), command=win.destroy).pack(pady=(8, 0))
 
     def on_double_click(self, event: tk.Event) -> None:
         """Xử lý thao tác double-click để xem chi tiết."""

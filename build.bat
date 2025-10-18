@@ -11,11 +11,11 @@ if not exist ".venv" (
 )
 call .venv\Scripts\activate.bat
 
-python -m pip install --upgrade pip
+python -m pip install --upgrade pip setuptools wheel
 if exist requirements.txt (
-    pip install -r requirements.txt
+    python -m pip install -r requirements.txt
 ) else (
-    pip install pyinstaller oracledb cx-Oracle
+    python -m pip install pyinstaller oracledb cx-Oracle cryptography requests
 )
 
 :: Dọn build cũ
@@ -23,12 +23,13 @@ if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
 
 :: Build 1 file exe + icon + kèm data
-pyinstaller main.py ^
+python -m PyInstaller main.py ^
+  --clean ^
   --onefile ^
   --name "ToolONWA" ^
   --noconsole ^
   --icon "icons\logo.ico" ^
-  --add-data "configs;configs" ^
+  --add-data "core\configs;core/configs" ^
   --add-data "ora;ora" ^
   --add-data "fonts;fonts" ^
   --add-data "icons;icons" ^
@@ -52,6 +53,8 @@ pyinstaller main.py ^
   --hidden-import core.templates ^
   --hidden-import cryptography ^
   --hidden-import cryptography.x509 ^
+  --collect-data oracledb ^
+  --collect-data cx_Oracle ^
   --collect-submodules cryptography ^
   --collect-data cryptography
 

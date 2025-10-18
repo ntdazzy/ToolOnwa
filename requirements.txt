@@ -1,4 +1,5 @@
 oracledb
+cx-Oracle
 cryptography
 pyinstaller
 requests

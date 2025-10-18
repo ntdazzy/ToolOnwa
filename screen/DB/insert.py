@@ -507,7 +507,7 @@ class InsertWindow(tk.Toplevel):
             self.grid.configure_columns(self._columns)
             self.grid.clear()
             for row in current_rows:
-                self.grid.append_dict(row)
+                self.grid.append_dict(row, mark_new=False)
             self._generated_rows = current_rows
 
     def _clear(self):

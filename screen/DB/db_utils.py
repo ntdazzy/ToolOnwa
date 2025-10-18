@@ -7,7 +7,10 @@ from __future__ import annotations
 import contextlib
 import datetime as _dt
 import inspect
+import os
 import re
+import threading
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 try:
@@ -75,6 +78,11 @@ class OracleDriverNotAvailable(RuntimeError):
     """Raised when oracledb / cx_Oracle driver cannot be imported."""
 
 
+_THICK_INIT_LOCK = threading.Lock()
+_THICK_INIT_DONE = False
+_THICK_INIT_ERROR: Optional[str] = None
+
+
 def _supports_encoding_kwarg(driver: _Driver) -> bool:
     """
     Return True if the driver.connect callable accepts an 'encoding' keyword.
@@ -115,6 +123,107 @@ def build_dsn(host: str, port: str, alias_or_service: str, use_host_port: bool) 
     return cmd_sql_plus.build_dsn(host, port, alias_or_service, use_host_port)
 
 
+def _iter_oracle_client_dirs() -> List[Optional[str]]:
+    """
+    Yield candidate directories that may contain Oracle Client libraries.
+    The function tries custom env vars first, then common fallbacks, and finally
+    allows the driver to auto-detect when None is returned.
+    """
+    env_candidates = [
+        os.environ.get("TOOLVIP_ORACLE_CLIENT"),
+        os.environ.get("TOOLONWA_ORACLE_CLIENT"),
+        os.environ.get("ORACLE_CLIENT_PATH"),
+        os.environ.get("ORACLE_HOME"),
+        os.environ.get("OCI_LIB64"),
+        os.environ.get("OCI_LIB32"),
+    ]
+    path_candidates = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if "instantclient" in entry.lower():
+            path_candidates.append(entry)
+
+    base_dir = Path(__file__).resolve().parents[2]
+    local_candidates = [
+        base_dir / "instantclient",
+        base_dir / "oci",
+    ]
+
+    ordered: List[Optional[str]] = []
+    seen: set[str] = set()
+
+    def add_candidate(candidate: Optional[str]) -> None:
+        if not candidate:
+            return
+        expanded = os.path.normpath(os.path.expanduser(os.path.expandvars(candidate)))
+        if expanded in seen:
+            return
+        if os.path.isdir(expanded):
+            seen.add(expanded)
+            ordered.append(expanded)
+
+    for value in env_candidates:
+        add_candidate(value)
+    for value in path_candidates:
+        add_candidate(value)
+    for path in local_candidates:
+        add_candidate(str(path))
+
+    # Allow driver auto-detection as a last resort.
+    ordered.append(None)
+    return ordered
+
+
+def _ensure_thick_mode(driver: _Driver) -> None:
+    """
+    Ensure python-oracledb is running in thick mode when thin mode fails.
+    Raises RuntimeError with a helpful message if initialization is impossible.
+    """
+    if getattr(driver, "__name__", "") != "oracledb":
+        return
+    init_client = getattr(driver, "init_oracle_client", None)
+    is_thin_mode = getattr(driver, "is_thin_mode", None)
+    if not callable(init_client) or not callable(is_thin_mode):
+        return
+    if not driver.is_thin_mode():
+        return
+
+    global _THICK_INIT_DONE, _THICK_INIT_ERROR
+    with _THICK_INIT_LOCK:
+        if _THICK_INIT_DONE:
+            if _THICK_INIT_ERROR:
+                raise RuntimeError(_THICK_INIT_ERROR)
+            return
+
+        last_exc: Optional[Exception] = None
+        for candidate in _iter_oracle_client_dirs():
+            try:
+                if candidate:
+                    init_client(lib_dir=candidate)
+                else:
+                    init_client()
+                _THICK_INIT_DONE = True
+                _THICK_INIT_ERROR = None
+                return
+            except Exception as exc:
+                last_exc = exc
+                continue
+
+        hint = (
+            "Không thể khởi tạo Oracle Client ở chế độ thick. "
+            "Hãy cài đặt Oracle Instant Client và đặt biến môi trường "
+            "TOOLVIP_ORACLE_CLIENT tới thư mục chứa thư viện (oci.dll/libclntsh.so)."
+        )
+        detail = f"{hint} Chi tiết lỗi cuối cùng: {last_exc}" if last_exc else hint
+        _THICK_INIT_DONE = True
+        _THICK_INIT_ERROR = detail
+        raise RuntimeError(detail)
+
+
+def _should_retry_with_thick(exc: Exception) -> bool:
+    message = str(exc)
+    return "DPY-3015" in message or "password verifier type" in message
+
+
 def connect_oracle(
     user: str,
     password: str,
@@ -129,16 +238,28 @@ def connect_oracle(
     """
     driver = load_driver()
     dsn = build_dsn(host, port, alias_or_service, use_host_port)
-    connect_kwargs = {"user": user, "password": password, "dsn": dsn}
-    if _supports_encoding_kwarg(driver):
-        connect_kwargs["encoding"] = encoding
+    supports_encoding = _supports_encoding_kwarg(driver)
+
+    def do_connect(include_encoding: bool) -> Any:
+        kwargs = {"user": user, "password": password, "dsn": dsn}
+        if include_encoding and supports_encoding:
+            kwargs["encoding"] = encoding
+        try:
+            return driver.connect(**kwargs)
+        except TypeError as type_err:
+            if include_encoding and "encoding" in str(type_err):
+                return driver.connect(user=user, password=password, dsn=dsn)
+            raise
+
     try:
-        return driver.connect(**connect_kwargs)
-    except TypeError as exc:
-        # python-oracledb in thin mode rejects the encoding kwarg, so retry without it.
-        if "encoding" in connect_kwargs and "encoding" in str(exc):
-            connect_kwargs.pop("encoding", None)
-            return driver.connect(**connect_kwargs)
+        return do_connect(include_encoding=True)
+    except Exception as exc:
+        if getattr(driver, "__name__", "") == "oracledb" and _should_retry_with_thick(exc):
+            try:
+                _ensure_thick_mode(driver)
+            except Exception as thick_exc:
+                raise RuntimeError(f"{exc}\n{thick_exc}") from exc
+            return do_connect(include_encoding=True)
         raise
 
 

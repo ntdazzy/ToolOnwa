@@ -548,7 +548,7 @@ class UpdateWindow(tk.Toplevel):
             self.grid.configure_columns(self._columns)
             self.grid.clear()
             for row in current_rows:
-                self.grid.append_dict(row)
+                self.grid.append_dict(row, mark_new=False)
 
     def _clear(self):
         """Xóa dữ liệu trên lưới và vùng SQL."""
