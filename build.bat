@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 :: Ưu tiên Python 3.11 nếu có, fallback về python chuẩn
@@ -23,11 +23,16 @@ if not exist ".venv" (
 call .venv\Scripts\activate.bat
 
 python -m pip install --upgrade pip
+set "REQ_ERROR="
 if exist requirements.txt (
-    python -m pip install -r requirements.txt
+    python -m pip install -r requirements.txt || set "REQ_ERROR=1"
 )
-:: Đảm bảo PyInstaller và các driver cần thiết luôn được cài
-python -m pip install --upgrade pyinstaller oracledb cx-Oracle
+
+:: Cài tối thiểu các gói cần thiết nếu requirements thất bại hoặc thiếu
+python -m pip install --upgrade pyinstaller oracledb requests
+
+:: Cài cx-Oracle khi phù hợp (nếu đang dùng Python hỗ trợ và toolchain có sẵn)
+call :install_cx_oracle
 
 :: Dọn build cũ
 if exist build rmdir /s /q build
@@ -74,3 +79,24 @@ exit /b 0
 echo Failed to create venv. Check Python installation.
 pause
 exit /b 1
+
+:install_cx_oracle
+for /f "delims=" %%v in ('python -c "import sys; print(sys.version_info.major)"') do set "PY_MAJOR=%%v"
+for /f "delims=" %%v in ('python -c "import sys; print(sys.version_info.minor)"') do set "PY_MINOR=%%v"
+if not defined PY_MAJOR goto :install_cx_oracle_end
+
+set "SKIP_CXO="
+if !PY_MAJOR! GTR 3 set "SKIP_CXO=1"
+if !PY_MAJOR! EQU 3 if !PY_MINOR! GEQ 13 set "SKIP_CXO=1"
+
+if defined SKIP_CXO (
+    echo Skipping cx-Oracle install for Python !PY_MAJOR!.!PY_MINOR! (prebuilt wheels unavailable).
+) else (
+    python -m pip install --upgrade cx-Oracle || (
+        echo.
+        echo WARNING: Could not install cx-Oracle. Install "Microsoft C++ Build Tools" then rerun if native driver is required.
+    )
+)
+
+:install_cx_oracle_end
+exit /b 0
