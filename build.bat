@@ -54,7 +54,6 @@ python -m PyInstaller main.py ^
   --hidden-import cryptography ^
   --hidden-import cryptography.x509 ^
   --collect-data oracledb ^
-  --collect-data cx_Oracle ^
   --collect-submodules cryptography ^
   --collect-data cryptography
 

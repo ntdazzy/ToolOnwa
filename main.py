@@ -3,7 +3,8 @@
 """
 ToolONWA VIP v1.0 - main
 """
-import os, re, sys, json, threading
+import os, re, sys, json, threading, logging
+import datetime as dt
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from tkinter import font as tkfont
@@ -46,6 +47,44 @@ ICON_PATH = os.path.join(READ_ICONS_DIR, "logo.ico")
 CONFIGS_DIR = os.path.join(PERSIST_DIR, "configs")
 CONFIG_PATH = os.path.join(CONFIGS_DIR, "config.json")
 DB_LIST_PATH = os.path.join(CONFIGS_DIR, "db_list.json")
+LOG_DIR = os.path.join(PERSIST_DIR, "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+LOGGER = logging.getLogger("ToolVIP")
+
+
+def _setup_global_logging() -> None:
+    log_path = os.path.join(LOG_DIR, dt.datetime.now().strftime("%Y%m%d") + ".log")
+    handlers: list[logging.Handler] = []
+    try:
+        handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
+    except Exception:
+        pass
+    handlers.append(logging.StreamHandler())
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s:%(lineno)d %(message)s",
+        handlers=handlers,
+    )
+
+    def _global_excepthook(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        logging.getLogger("ToolVIP").exception("Unhandled exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+    sys.excepthook = _global_excepthook
+
+    def _threading_excepthook(args: threading.ExceptHookArgs) -> None:
+        logging.getLogger("ToolVIP").exception(
+            "Unhandled thread exception in %s", args.thread.name if args.thread else "thread",
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
+
+    threading.excepthook = _threading_excepthook
+
+
+_setup_global_logging()
 # ---------------- helpers ----------------
 _ALIAS_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*=\s*\(", re.MULTILINE)
 def parse_tnsnames_blocks(text: str):
@@ -94,7 +133,8 @@ def load_config():
         if not os.path.isfile(cfg.get("ora_path","")):
             cfg["ora_path"] = DEFAULT_ORA_PATH; save_config(cfg)
         return cfg
-    except Exception:
+    except Exception as exc:
+        LOGGER.exception("Failed to load config %s", CONFIG_PATH)
         return {"lang":"VN","ora_path":DEFAULT_ORA_PATH,"last_alias":None,"use_host_port":False}
 
 def ensure_db_list_file():
@@ -135,6 +175,9 @@ class ToolVIP(tk.Tk):
         i18n.set_language(preferred_lang)
         self.lang = i18n.get_language()
         self.current_ora_path = self.config.get("ora_path") or DEFAULT_ORA_PATH
+        self._logger = logging.getLogger("ToolVIP")
+        self.report_callback_exception = self._handle_callback_exception
+        self._logger.info("Application started")
 
         # state
         self.show_pwd = tk.BooleanVar(value=False)
@@ -163,7 +206,8 @@ class ToolVIP(tk.Tk):
                 for fn in os.listdir(FONTS_DIR):
                     if fn.lower().endswith((".ttf",".otf")):
                         ctypes.windll.gdi32.AddFontResourceExW(os.path.join(FONTS_DIR,fn), FR_PRIVATE,0)
-        except Exception: pass
+        except Exception as exc:
+            self._logger.warning("Failed to register font resources: %s", exc)
         style = ttk.Style()
         style.configure("TButton", padding=(10,6))
         style.configure("Status.TLabel", padding=(6,2))
@@ -236,6 +280,8 @@ class ToolVIP(tk.Tk):
         self.btn_open_ora.grid(row=1, column=0, sticky="ew", pady=(6, 6))
         self.btn_check = ttk.Button(self.frm_shortcuts, command=self._check_connection, width=18)
         self.btn_check.grid(row=2, column=0, sticky="ew")
+        self.btn_show_logs = ttk.Button(self.frm_shortcuts, command=self._show_logs_dialog, width=18)
+        self.btn_show_logs.grid(row=3, column=0, sticky="ew", pady=(6, 0))
 
         self.frm_action = ttk.LabelFrame(self.db_group, padding=8, relief="ridge", borderwidth=2)
         self.frm_action.grid(row=1, column=0, columnspan=2, sticky="ew")
@@ -325,6 +371,7 @@ class ToolVIP(tk.Tk):
 
         self.btn_open_ora.config(text=self._t("main.btn.open_ora"))
         self.btn_check.config(text=self._t("main.btn.check_connection"))
+        self.btn_show_logs.config(text=self._t("main.btn.show_logs"))
 
         self.frm_action.config(text=self._t("main.section.actions"))
         self.btn_insert.config(text=self._t("main.btn.insert"))
@@ -349,6 +396,16 @@ class ToolVIP(tk.Tk):
         self.btn_details.config(text=self._t("main.btn.details"))
 
         self.lbl_language.config(text=self._t("main.label.language"))
+
+    def _handle_callback_exception(self, exc, value, tb) -> None:
+        self._logger.exception("Tkinter callback error", exc_info=(exc, value, tb))
+        try:
+            messagebox.showerror(APP_TITLE, self._t("main.msg.generic_error", error=str(value)), parent=self)
+        except Exception:
+            pass
+
+    def _log_exception(self, message: str) -> None:
+        self._logger.exception(message)
 
     def _on_change_lang(self, _event=None) -> None:
         lang = self.cbo_lang.get()
@@ -387,8 +444,9 @@ class ToolVIP(tk.Tk):
         try:
             with open(path,"r",encoding="utf-8",errors="ignore") as f: text=f.read()
             self.conn_blocks=parse_tnsnames_blocks(text)
-        except Exception as e:
-            messagebox.showerror(APP_TITLE, self._t("main.msg.load_tns_error", error=str(e)))
+        except Exception as exc:
+            self._log_exception(f"Failed to load tnsnames file: {path}")
+            messagebox.showerror(APP_TITLE, self._t("main.msg.load_tns_error", error=str(exc)))
 
     def _load_combobox_from_json(self):
         ensure_configs_dir()
@@ -396,7 +454,8 @@ class ToolVIP(tk.Tk):
             with open(DB_LIST_PATH,"r",encoding="utf-8") as f:
                 data=json.load(f)
             items=[str(x) for x in data.get("items",[])]
-        except Exception:
+        except Exception as exc:
+            self._log_exception(f"Failed to read DB list from {DB_LIST_PATH}")
             items=[]
         self.cbo_conn["values"]=items
         if items:
@@ -467,10 +526,12 @@ class ToolVIP(tk.Tk):
                 )
                 conn.close()
                 result["ok"] = True
-            except db_utils.OracleDriverNotAvailable as e:
-                result["msg"] = str(e)
-            except Exception as e:
-                result["msg"] = str(e)
+            except db_utils.OracleDriverNotAvailable as exc:
+                self._logger.error("Oracle driver not available: %s", exc)
+                result["msg"] = str(exc)
+            except Exception as exc:
+                self._logger.exception("Connection check failed for %s", data_src)
+                result["msg"] = str(exc)
             finally:
                 self.after(0, finish)
 
@@ -538,6 +599,82 @@ class ToolVIP(tk.Tk):
 
 
     def _coming_soon(self): messagebox.showinfo(APP_TITLE, self._t("main.msg.coming_soon"))
+
+    def _show_logs_dialog(self) -> None:
+        try:
+            files = sorted(
+                [os.path.join(LOG_DIR, name) for name in os.listdir(LOG_DIR) if name.lower().endswith(".log")],
+                reverse=True,
+            )
+        except Exception as exc:
+            self._logger.exception("Failed to list log files")
+            messagebox.showerror(APP_TITLE, self._t("main.log.open_error", error=str(exc)), parent=self)
+            return
+
+        win = tk.Toplevel(self)
+        win.title(i18n.translate("main.log.title"))
+        win.geometry("520x380")
+        win.resizable(False, False)
+        try:
+            if os.path.isfile(ICON_PATH):
+                win.iconbitmap(ICON_PATH)
+        except Exception:
+            pass
+        frame = ttk.Frame(win, padding=10)
+        frame.pack(fill="both", expand=True)
+
+        if not files:
+            ttk.Label(frame, text=i18n.translate("main.log.no_files")).pack(fill="x", pady=(0, 8))
+            ttk.Button(frame, text=self._t("common.close"), command=win.destroy).pack(anchor="e")
+            return
+
+        listbox = tk.Listbox(frame, height=14, activestyle="dotbox")
+        listbox.pack(fill="both", expand=True)
+        for path in files:
+            listbox.insert(tk.END, os.path.basename(path))
+
+        listbox.bind("<Double-Button-1>", lambda _e: self._open_log_file(win, files, listbox))
+        ttk.Button(frame, text=self._t("common.close"), command=win.destroy).pack(anchor="e", pady=(8, 0))
+        listbox.focus_set()
+
+    def _open_log_file(self, parent: tk.Toplevel, files: list[str], listbox: tk.Listbox) -> None:
+        selection = listbox.curselection()
+        if not selection:
+            return
+        path = files[selection[0]]
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+                content = fh.read()
+        except Exception as exc:
+            self._logger.exception("Failed to open log file %s", path)
+            messagebox.showerror(APP_TITLE, self._t("main.log.open_error", error=str(exc)), parent=parent)
+            return
+
+        win = tk.Toplevel(parent)
+        win.title(i18n.translate("main.log.content_title", name=os.path.basename(path)))
+        win.geometry("840x520")
+        try:
+            if os.path.isfile(ICON_PATH):
+                win.iconbitmap(ICON_PATH)
+        except Exception:
+            pass
+        text = ScrolledText(win, wrap="word")
+        text.pack(fill="both", expand=True, padx=8, pady=(8, 0))
+        text.insert("1.0", content)
+        text.configure(state="disabled")
+
+        btn_frame = ttk.Frame(win, padding=8)
+        btn_frame.pack(fill="x")
+        ttk.Button(btn_frame, text=i18n.translate("main.log.copy"), command=lambda: self._copy_log_to_clipboard(content)).pack(side="left")
+        ttk.Button(btn_frame, text=self._t("common.close"), command=win.destroy).pack(side="right")
+
+    def _copy_log_to_clipboard(self, content: str) -> None:
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(content)
+            messagebox.showinfo(APP_TITLE, i18n.translate("main.log.copied"), parent=self)
+        except Exception as exc:
+            self._logger.exception("Copy log failed")
     def _edit_connection(self):
         initial = {
             "user": self.ent_user.get().strip(),
@@ -565,8 +702,9 @@ class ToolVIP(tk.Tk):
             messagebox.showwarning(APP_TITLE, self._t("main.msg.missing_credentials")); return
         try:
             cmd_sql_plus.open_sqlplus(user, pwd, host, port, alias, self.var_use_host_port.get())
-        except Exception as e:
-            messagebox.showerror(APP_TITLE, self._t("main.msg.sqlplus_error", error=str(e)))
+        except Exception as exc:
+            self._logger.exception("Failed to open SQL*Plus for %s", alias)
+            messagebox.showerror(APP_TITLE, self._t("main.msg.sqlplus_error", error=str(exc)))
 
     def _collect_connection_info(self) -> dict | None:
         user = self.ent_user.get().strip()
@@ -590,8 +728,9 @@ class ToolVIP(tk.Tk):
         """Mở màn hình quản lý thông tin RDS."""
         try:
             rdsinfo.open_rds_window(self)
-        except Exception as e:
-            messagebox.showerror(APP_TITLE, self._t("rds.msg.open_error", error=str(e)), parent=self)
+        except Exception as exc:
+            self._logger.exception("Failed to open RDS window")
+            messagebox.showerror(APP_TITLE, self._t("rds.msg.open_error", error=str(exc)), parent=self)
 
     def _open_insert_screen(self):
         info = self._collect_connection_info()
@@ -635,22 +774,16 @@ class ToolVIP(tk.Tk):
             window.bind("<Destroy>", _cleanup)
             self._history_window = window
         except Exception as exc:
+            self._logger.exception("Failed to open history window")
             messagebox.showerror(APP_TITLE, self._t("history.msg.open_error", error=str(exc)), parent=self)
 
 
     def _open_log_view_mu(self):
         try:
             log_viewer.open_log_viewer(self, ICON_PATH)
-        except Exception as e:
-            messagebox.showerror(APP_TITLE, self._t("main.msg.log_viewer_error", error=str(e)))
+        except Exception as exc:
+            self._logger.exception("Failed to open MU log viewer")
+            messagebox.showerror(APP_TITLE, self._t("main.msg.log_viewer_error", error=str(exc)))
 
 def main(): app=ToolVIP(); app.mainloop()
 if __name__=="__main__": main()
-
-
-
-
-
-
-
-

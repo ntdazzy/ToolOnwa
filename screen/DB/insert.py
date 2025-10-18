@@ -3,6 +3,7 @@ Màn hình Insert phục vụ nhập liệu vào bảng cơ sở dữ liệu.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -17,6 +18,8 @@ from screen.DB.template_dialog import TemplateLibraryDialog, TemplateSaveDialog
 APP_TITLE_KEY = "common.app_title"
 
 ACTIVE_WINDOWS: List["InsertWindow"] = []
+
+logger = logging.getLogger("ToolVIP.Insert")
 
 
 class InsertWindow(tk.Toplevel):
@@ -46,6 +49,7 @@ class InsertWindow(tk.Toplevel):
         self._current_table_label: str = "..."
         self._metadata_cache: Dict[str, Dict[str, Any]] = {}
         self._metadata_token: int = 0
+        self._logger = logger
 
         ACTIVE_WINDOWS.append(self)
 
@@ -56,6 +60,9 @@ class InsertWindow(tk.Toplevel):
         self._apply_language()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._connect_async)
+
+    def _log_exception(self, message: str, exc: Exception) -> None:
+        self._logger.exception("%s", message, exc_info=exc)
 
     # ------------------------------------------------------------------
     def _build_ui(self):
@@ -194,10 +201,12 @@ class InsertWindow(tk.Toplevel):
                 tables = db_utils.fetch_accessible_tables(self.conn)
             except db_utils.OracleDriverNotAvailable as exc:
                 msg = str(exc)
+                self._log_exception("Oracle driver unavailable for insert window", exc)
                 self.after(0, lambda m=msg: self._show_error(m))
                 return
             except Exception as exc:
                 msg = self._t("common.msg.connection_error", error=str(exc))
+                self._log_exception("Failed to connect or fetch tables in insert window", exc)
                 self.after(0, lambda m=msg: self._show_error(m))
                 return
             self.after(0, lambda: self._init_tables(tables))
@@ -208,6 +217,7 @@ class InsertWindow(tk.Toplevel):
     def _show_error(self, msg: str):
         """Hiển thị thông báo lỗi và đóng cửa sổ."""
         self._hide_loading()
+        self._logger.error("Insert window error: %s", msg)
         messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
         self.destroy()
 
@@ -318,6 +328,7 @@ class InsertWindow(tk.Toplevel):
                 columns = db_utils.fetch_table_columns(self.conn, table_key, self.current_owner)
                 pk_cols = db_utils.fetch_primary_keys(self.conn, table_key, self.current_owner)
             except Exception as exc:
+                self._log_exception(f"Failed to fetch metadata for table {table_key}", exc)
                 self.after(0, lambda: self._handle_metadata_error(item, exc, token))
                 return
             self._metadata_cache[table_key] = {"columns": columns, "pk": pk_cols}
@@ -359,6 +370,7 @@ class InsertWindow(tk.Toplevel):
         self._hide_loading()
         self._set_controls_enabled(True)
         self._set_sql_label("...")
+        self._log_exception(f"Metadata error for table {item.get('full')}", exc)
         messagebox.showerror(
             self._t(APP_TITLE_KEY),
             self._t("insert.msg.metadata_error", error=str(exc)),
@@ -447,8 +459,9 @@ class InsertWindow(tk.Toplevel):
                 sql_text=trimmed,
             )
             self._draft_history_id = action_id
-        except Exception:
+        except Exception as exc:
             self._draft_history_id = None
+            self._log_exception("Failed to record insert draft history", exc)
 
     def _copy_sql(self):
         """Copy câu SQL đã sinh vào clipboard."""
@@ -557,6 +570,7 @@ class InsertWindow(tk.Toplevel):
                 duplicates = db_utils.fetch_rows_by_pk(self.conn, table, self.current_owner, pk_cols, keys)
         except Exception as exc:
             msg = self._t("insert.msg.check_duplicates_error", error=str(exc))
+            self._log_exception("Failed to check duplicate rows before insert", exc)
             self._log_history_status("failed", msg, row_count, sql_text_trim, table)
             messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return
@@ -588,6 +602,7 @@ class InsertWindow(tk.Toplevel):
                 )
             except Exception as exc:
                 msg = self._t("insert.msg.delete_old_error", error=str(exc))
+                self._log_exception("Failed to delete duplicate rows before insert", exc)
                 self._log_history_status("failed", msg, row_count, sql_text_trim, table)
                 messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
                 return
@@ -599,6 +614,7 @@ class InsertWindow(tk.Toplevel):
             db_utils.insert_rows(self.conn, table, self.current_owner, self._columns, ordered_rows)
         except Exception as exc:
             msg = self._t("insert.msg.insert_error", error=str(exc))
+            self._log_exception("Failed to execute insert rows", exc)
             self._log_history_status("failed", msg, row_count, sql_text_trim, table)
             messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return
@@ -620,8 +636,8 @@ class InsertWindow(tk.Toplevel):
         try:
             if self.conn:
                 self.conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_exception("Failed to close insert connection", exc)
         self.destroy()
 
     def destroy(self):
@@ -669,8 +685,8 @@ class InsertWindow(tk.Toplevel):
                     message=message,
                     sql_text=sql_text,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_exception("Failed to write insert history status", exc)
         finally:
             if status in {"success", "failed"}:
                 self._draft_history_id = None
@@ -738,8 +754,8 @@ class InsertWindow(tk.Toplevel):
         """Áp dụng biểu tượng cho cửa sổ Insert nếu khả dụng."""
         try:
             self.iconbitmap("icons/logo.ico")
-        except Exception:
-            pass
+        except Exception as exc:
+            self._logger.debug("Insert window icon not applied: %s", exc)
 
     def _t(self, key: str, **kwargs) -> str:
         """Tra cứu chuỗi i18n."""

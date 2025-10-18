@@ -1,4 +1,5 @@
 # log_viewer.py
+import logging
 import os
 import re
 import subprocess
@@ -32,6 +33,8 @@ def resource_path(rel: str) -> str:
 DEFAULT_ICON_PATH = resource_path(os.path.join("icons", "logo.ico"))
 
 thread_screen_map: dict[str, str] = {}
+
+logger = logging.getLogger("ToolVIP.LogViewer")
 
 
 @dataclass
@@ -166,6 +169,7 @@ def parse_sql(file_path: str) -> List[SqlEntry]:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
     except Exception as e:
+        logger.exception("Could not read log file %s", file_path)
         raise RuntimeError(f"Could not read log file {file_path}: {e}")
 
     global thread_screen_map
@@ -236,6 +240,7 @@ def parse_sql(file_path: str) -> List[SqlEntry]:
     try:
         return sorted(entries, key=lambda e: e.timestamp, reverse=True)
     except Exception:
+        logger.exception("Failed to sort SQL entries")
         return entries
 
 def parse_errors(file_path: str) -> List[ErrorEntry]:
@@ -245,6 +250,7 @@ def parse_errors(file_path: str) -> List[ErrorEntry]:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
     except Exception as e:
+        logger.exception("Could not read log file %s", file_path)
         raise RuntimeError(f"Could not read log file {file_path}: {e}")
 
     i = 0
@@ -284,6 +290,7 @@ def parse_errors(file_path: str) -> List[ErrorEntry]:
     try:
         return sorted(errors, key=lambda e: e.timestamp, reverse=True)
     except Exception:
+        logger.exception("Failed to sort error entries")
         return errors
 
 def format_sql(sql: str) -> str:
@@ -676,6 +683,7 @@ class LogViewerApp:
             self.error_entries = parse_errors(file_path)
         except Exception:
             import traceback
+            logger.exception("Failed to refresh log file %s", file_path)
             messagebox.showerror(
                 i18n.translate(APP_TITLE_KEY),
                 self._("msg.read_error", error=traceback.format_exc()),
@@ -702,6 +710,7 @@ class LogViewerApp:
             self.error_entries = parse_errors(file_path)
         except Exception:
             import traceback
+            logger.exception("Failed to parse selected log file %s", file_path)
             messagebox.showerror(
                 i18n.translate(APP_TITLE_KEY),
                 self._("msg.read_error", error=traceback.format_exc()),
@@ -893,6 +902,7 @@ class LogViewerApp:
             else:
                 subprocess.Popen(["xdg-open", folder])
         except Exception as exc:
+            logger.exception("Failed to open log folder %s", folder)
             messagebox.showerror(i18n.translate(APP_TITLE_KEY), self._("open_folder_error", error=str(exc)), parent=self.root)
 
     def _format_path(self, path: str) -> str:

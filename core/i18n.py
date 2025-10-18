@@ -61,6 +61,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "main.btn.sqlplus": {LANG_VI: "SQL Plus", LANG_JP: "SQL Plus"},
     "main.btn.compare": {LANG_VI: "So sánh dữ liệu", LANG_JP: "データ比較"},
     "main.btn.edit_conn": {LANG_VI: "Chỉnh sửa kết nối", LANG_JP: "接続編集"},
+    "main.btn.show_logs": {LANG_VI: "Xem log", LANG_JP: "ログ表示"},
     "main.btn.read_log_mu": {LANG_VI: "Đọc log MU", LANG_JP: "MUログ読込"},
     "main.btn.rds_info": {LANG_VI: "Thông tin RDS", LANG_JP: "RDS情報"},
     "main.btn.docs": {LANG_VI: "Tài liệu", LANG_JP: "ドキュメント"},
@@ -113,6 +114,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "main.msg.log_viewer_error": {
         LANG_VI: "Không mở được log viewer: {error}",
         LANG_JP: "ログビューアを開けません: {error}",
+    },
+    "main.msg.generic_error": {
+        LANG_VI: "Đã xảy ra lỗi: {error}",
+        LANG_JP: "エラーが発生しました: {error}",
     },
     "main.popup.details_title": {
         LANG_VI: "Chi tiết",
@@ -555,6 +560,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "log.label.keyword": {LANG_VI: "Từ khóa", LANG_JP: "キーワード"},
     "log.label.time_display": {LANG_VI: "Hiển thị thời gian", LANG_JP: "時間の表示"},
     "log.label.param_display": {LANG_VI: "Tham số", LANG_JP: "パラメータ"},
+    "log.label.important_only": {LANG_VI: "Chỉ hiển thị cột quan trọng", LANG_JP: "重要列のみ表示"},
     "log.option.sql": {LANG_VI: "SQL", LANG_JP: "SQL"},
     "log.option.error": {LANG_VI: "Lỗi", LANG_JP: "エラー"},
     "log.option.param_show": {LANG_VI: "Hiện tham số", LANG_JP: "パラメータ表示"},
@@ -568,6 +574,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "log.btn.refresh": {LANG_VI: "Tải lại", LANG_JP: "再読込"},
     "log.btn.reset": {LANG_VI: "Đặt lại lọc", LANG_JP: "フィルタをリセット"},
     "log.btn.open_folder": {LANG_VI: "Mở thư mục", LANG_JP: "フォルダを開く"},
+    "log.btn.save_log": {LANG_VI: "Lưu log", LANG_JP: "ログ保存"},
+    "log.btn.view_saved": {LANG_VI: "Log đã lưu", LANG_JP: "保存済みログ"},
     "log.btn.save_log": {LANG_VI: "Lưu log", LANG_JP: "ログ保存"},
     "log.btn.view_saved": {LANG_VI: "Log đã lưu", LANG_JP: "保存済みログ"},
     "log.btn.close": {LANG_VI: "Đóng", LANG_JP: "閉じる"},
@@ -589,6 +597,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "log.msg.save_success": {LANG_VI: "Đã lưu {count} log.", LANG_JP: "{count}件のログを保存しました。"},
     "log.msg.save_none": {LANG_VI: "Chưa chọn log nào để lưu.", LANG_JP: "保存するログが選択されていません。"},
     "log.msg.no_saved_log": {LANG_VI: "Chưa có log nào được lưu.", LANG_JP: "保存済みのログはありません。"},
+    "log.msg.save_success": {LANG_VI: "Đã lưu {count} log.", LANG_JP: "{count}件のログを保存しました。"},
+    "log.msg.save_none": {LANG_VI: "Chưa chọn log nào để lưu.", LANG_JP: "保存するログが選択されていません。"},
+    "log.msg.no_saved_log": {LANG_VI: "Chưa có log nào được lưu.", LANG_JP: "保存済みのログはありません。"},
     "log.msg.copied": {LANG_VI: "Đã copy", LANG_JP: "コピーしました"},
     "log.msg.sql_copied": {LANG_VI: "SQL đã được copy vào clipboard", LANG_JP: "SQLをコピーしました"},
     "log.msg.details_copied": {LANG_VI: "Chi tiết đã được copy vào clipboard", LANG_JP: "詳細をコピーしました"},
@@ -605,6 +616,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "log.detail.sql_title": {LANG_VI: "Chi tiết SQL", LANG_JP: "SQL詳細"},
     "log.detail.error_title": {LANG_VI: "Chi tiết lỗi", LANG_JP: "エラー詳細"},
     "log.detail.params_title": {LANG_VI: "Tham số", LANG_JP: "パラメータ"},
+
+    # --- Main logs ---
+    "main.log.title": {LANG_VI: "Danh sách log", LANG_JP: "ログ一覧"},
+    "main.log.no_files": {LANG_VI: "Chưa có file log.", LANG_JP: "ログファイルがありません。"},
+    "main.log.open_error": {LANG_VI: "Không mở được log: {error}", LANG_JP: "ログを開けません: {error}"},
+    "main.log.content_title": {LANG_VI: "Nội dung {name}", LANG_JP: "{name} の内容"},
+    "main.log.copied": {LANG_VI: "Đã copy vào clipboard", LANG_JP: "クリップボードにコピーしました"},
+    "main.log.copy": {LANG_VI: "Copy", LANG_JP: "コピー"},
 }
 
 

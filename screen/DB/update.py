@@ -3,6 +3,7 @@ Màn hình Update hỗ trợ xem và cập nhật dữ liệu.
 """
 from __future__ import annotations
 
+import logging
 import re
 import threading
 import tkinter as tk
@@ -18,6 +19,8 @@ from core import history, i18n, templates
 APP_TITLE_KEY = "common.app_title"
 
 ACTIVE_WINDOWS: List["UpdateWindow"] = []
+
+logger = logging.getLogger("ToolVIP.Update")
 
 
 class UpdateWindow(tk.Toplevel):
@@ -47,6 +50,7 @@ class UpdateWindow(tk.Toplevel):
         self._current_table_label: str = "..."
         self._metadata_cache: Dict[str, Dict[str, Any]] = {}
         self._metadata_token: int = 0
+        self._logger = logger
 
         ACTIVE_WINDOWS.append(self)
 
@@ -57,6 +61,12 @@ class UpdateWindow(tk.Toplevel):
         self._apply_language()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._connect_async)
+
+    def _log_exception(self, message: str, exc: Exception) -> None:
+        self._logger.exception("%s", message, exc_info=exc)
+
+    def _log_exception(self, message: str, exc: Exception) -> None:
+        self._logger.exception("%s", message, exc_info=exc)
 
     # ------------------------------------------------------------------
     def _build_ui(self):
@@ -212,10 +222,12 @@ class UpdateWindow(tk.Toplevel):
                 tables = db_utils.fetch_accessible_tables(self.conn)
             except db_utils.OracleDriverNotAvailable as exc:
                 msg = str(exc)
+                self._log_exception("Oracle driver unavailable for update window", exc)
                 self.after(0, lambda m=msg: self._show_error(m))
                 return
             except Exception as exc:
                 msg = self._t("common.msg.connection_error", error=str(exc))
+                self._log_exception("Failed to connect or fetch tables in update window", exc)
                 self.after(0, lambda m=msg: self._show_error(m))
                 return
             self.after(0, lambda: self._init_tables(tables))
@@ -226,6 +238,7 @@ class UpdateWindow(tk.Toplevel):
     def _show_error(self, msg: str):
         """Hiển thị lỗi và đóng cửa sổ khi không thể khởi tạo."""
         self._hide_loading()
+        self._logger.error("Update window error: %s", msg)
         messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
         self.destroy()
 
@@ -341,6 +354,7 @@ class UpdateWindow(tk.Toplevel):
                 columns = db_utils.fetch_table_columns(self.conn, table_key, self.current_owner)
                 pk_cols = db_utils.fetch_primary_keys(self.conn, table_key, self.current_owner)
             except Exception as exc:
+                self._log_exception(f"Failed to fetch metadata for table {table_key}", exc)
                 self.after(0, lambda: self._handle_metadata_error(item, exc, token))
                 return
             self._metadata_cache[table_key] = {"columns": columns, "pk": pk_cols}
@@ -382,6 +396,7 @@ class UpdateWindow(tk.Toplevel):
         self._hide_loading()
         self._set_controls_enabled(True)
         self._set_sql_label("...")
+        self._log_exception(f"Metadata error for table {item.get('full')}", exc)
         self._columns = []
         self._column_meta.clear()
         self._pk_columns = []
@@ -488,8 +503,9 @@ class UpdateWindow(tk.Toplevel):
                 sql_text=trimmed,
             )
             self._draft_history_id = action_id
-        except Exception:
+        except Exception as exc:
             self._draft_history_id = None
+            self._log_exception("Failed to record update draft history", exc)
 
     def _copy_sql(self):
         """Copy câu SQL đang hiển thị vào clipboard."""
@@ -591,6 +607,7 @@ class UpdateWindow(tk.Toplevel):
         try:
             cur = self.conn.cursor()
         except Exception as exc:
+            self._log_exception("Failed to create cursor for update", exc)
             msg = self._t("update.msg.cursor_error", error=str(exc))
             self._log_history_status("failed", msg, row_count, sql_text_trim, table)
             messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
@@ -624,6 +641,7 @@ class UpdateWindow(tk.Toplevel):
                 cur.execute(sql, binds)
             self.conn.commit()
         except Exception as exc:
+            self._log_exception("Failed executing update statements", exc)
             self.conn.rollback()
             msg = self._t("update.msg.update_error", error=str(exc))
             self._log_history_status("failed", msg, row_count, sql_text_trim, table)
@@ -684,8 +702,8 @@ class UpdateWindow(tk.Toplevel):
         try:
             if self.conn:
                 self.conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_exception("Failed to close update connection", exc)
         self.destroy()
 
     def _log_history_status(self, status: str, message: str, row_count: int, sql_text: str, table: Optional[str]) -> None:
@@ -722,8 +740,8 @@ class UpdateWindow(tk.Toplevel):
                     message=message,
                     sql_text=sql_text,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_exception("Failed to write update history status", exc)
         finally:
             if status in {"success", "failed"}:
                 self._draft_history_id = None

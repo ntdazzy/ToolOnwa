@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import logging
 import re
 import threading
 import tkinter as tk
@@ -17,6 +18,8 @@ from screen.DB.widgets import DataGrid, LoadingPopup
 from core import history, i18n
 
 APP_TITLE_KEY = "common.app_title"
+
+logger = logging.getLogger("ToolVIP.Backup")
 
 
 class BackupRestoreBase(tk.Toplevel):
@@ -38,6 +41,7 @@ class BackupRestoreBase(tk.Toplevel):
         self.geometry(self.GEOMETRY)
         self.minsize(480, 560)
         self.resizable(True, True)
+        self._logger = logger
         self._set_icon()
 
         self._history_action_type = "sql_script"
@@ -61,6 +65,9 @@ class BackupRestoreBase(tk.Toplevel):
         self._apply_language()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(120, self._connect_async)
+
+    def _log_exception(self, message: str, exc: Exception) -> None:
+        self._logger.exception("%s", message, exc_info=exc)
 
     # ------------------------------------------------------------------
     def _build_ui(self):
@@ -125,10 +132,12 @@ class BackupRestoreBase(tk.Toplevel):
                 tables = db_utils.fetch_accessible_tables(self.conn)
             except db_utils.OracleDriverNotAvailable as exc:
                 msg = str(exc)
+                self._log_exception("Oracle driver unavailable for backup window", exc)
                 self.after(0, lambda m=msg: self._show_error(m))
                 return
             except Exception as exc:
                 msg = self._t("common.msg.connection_error", error=str(exc))
+                self._log_exception("Failed to connect or fetch tables in backup window", exc)
                 self.after(0, lambda m=msg: self._show_error(m))
                 return
             self.after(0, lambda: self._init_tables(tables))
@@ -139,6 +148,7 @@ class BackupRestoreBase(tk.Toplevel):
     def _show_error(self, msg: str):
         """Hiển thị lỗi và đóng cửa sổ khi không thể tiếp tục."""
         self._hide_loading()
+        self._logger.error("Backup window error: %s", msg)
         messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
         self.destroy()
 
@@ -240,6 +250,7 @@ class BackupRestoreBase(tk.Toplevel):
             try:
                 columns = db_utils.fetch_table_columns(self.conn, table_key, self.current_owner)
             except Exception as exc:
+                self._log_exception(f"Failed to load column metadata for {table_key}", exc)
                 self.after(0, lambda: self._handle_metadata_error(item, exc, token))
                 return
             self._metadata_cache[table_key] = {"columns": columns}
@@ -272,6 +283,7 @@ class BackupRestoreBase(tk.Toplevel):
             return
         self._hide_loading()
         self._set_metadata_loading(False)
+        self._log_exception(f"Metadata error for table {item.get('full')}", exc)
         messagebox.showerror(
             self._t(APP_TITLE_KEY),
             self._t("backup.msg.metadata_error", error=str(exc)),
@@ -325,8 +337,8 @@ class BackupRestoreBase(tk.Toplevel):
         try:
             if self.conn:
                 self.conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_exception("Failed to close backup connection", exc)
         self.destroy()
 
     def _show_loading(self, message: str):
@@ -360,6 +372,7 @@ class BackupRestoreBase(tk.Toplevel):
             cur = self.conn.cursor()
         except Exception as exc:
             msg = self._t("backup.msg.cursor_error", error=str(exc))
+            self._log_exception("Failed to create cursor for backup execution", exc)
             history.log_action(self._history_action_type, object_name, row_count, "failed", message=msg, sql_text=sql_trim)
             messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return False
@@ -372,8 +385,8 @@ class BackupRestoreBase(tk.Toplevel):
                     history.mark_action_status(action_id, status, message, row_count=row_count, sql_text=sql_trim)
                 else:
                     history.log_action(self._history_action_type, object_name, row_count, status, message=message, sql_text=sql_trim)
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_exception("Failed to finalize backup history status", exc)
 
         try:
             for stmt in statements:
@@ -387,6 +400,7 @@ class BackupRestoreBase(tk.Toplevel):
                     self.conn.rollback()
                     self._append_log(f"  ERROR: {exc}")
                     msg = self._t("backup.msg.execute_error", error=str(exc))
+                    self._log_exception("Failed executing backup statement", exc)
                     _finalize("failed", msg)
                     messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
                     return False
@@ -398,8 +412,8 @@ class BackupRestoreBase(tk.Toplevel):
         finally:
             try:
                 cur.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                self._logger.debug("Backup cursor close failed: %s", exc)
 
 
     @staticmethod
@@ -808,6 +822,7 @@ class RestoreFromCSVWindow(BackupRestoreBase):
                 headers = [h.strip() for h in reader.fieldnames]
                 rows = [row for row in reader]
         except Exception as exc:
+            self._log_exception(f"Failed to import CSV {path}", exc)
             messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.read_csv_error", error=str(exc)), parent=self)
             return
 
@@ -877,6 +892,7 @@ class RestoreFromCSVWindow(BackupRestoreBase):
             cur = self.conn.cursor()
         except Exception as exc:
             msg = self._t("backup.msg.cursor_error", error=str(exc))
+            self._log_exception("Failed to create cursor for CSV restore", exc)
             history.log_action(self._history_action_type, full_table, row_count, "failed", message=msg, sql_text=sql_summary)
             messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return
@@ -889,8 +905,8 @@ class RestoreFromCSVWindow(BackupRestoreBase):
                     history.mark_action_status(action_id, status, message, row_count=row_count, sql_text=sql_summary)
                 else:
                     history.log_action(self._history_action_type, full_table, row_count, status, message=message, sql_text=sql_summary)
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_exception("Failed to finalize CSV restore history", exc)
 
         try:
             for idx, row in enumerate(self.imported_rows, start=1):
@@ -908,14 +924,15 @@ class RestoreFromCSVWindow(BackupRestoreBase):
             self.conn.rollback()
             self._append_log(f"ERROR: {exc}")
             msg = self._t("backup.msg.restore_error", error=str(exc))
+            self._log_exception("Failed during CSV restore execution", exc)
             _finalize("failed", msg)
             messagebox.showerror(self._t(APP_TITLE_KEY), msg, parent=self)
             return
         finally:
             try:
                 cur.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                self._logger.debug("CSV restore cursor close failed: %s", exc)
 
         self._append_log(self._t("backup.log.restore_done"))
         _finalize("success", self._t("backup.log.restore_done"))
