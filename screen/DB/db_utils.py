@@ -105,7 +105,19 @@ def connect_oracle(
     """
     driver = load_driver()
     dsn = build_dsn(host, port, alias_or_service, use_host_port)
-    return driver.connect(user=user, password=password, dsn=dsn, encoding=encoding)
+    try:
+        return driver.connect(user=user, password=password, dsn=dsn, encoding=encoding)
+    except TypeError as exc:
+        # Một số phiên bản cx_Oracle cũ không hỗ trợ tham số encoding.
+        if "encoding" in str(exc):
+            return driver.connect(user=user, password=password, dsn=dsn)
+        raise
+    except ModuleNotFoundError as exc:
+        if getattr(exc, "name", "") == "cryptography":
+            raise OracleDriverNotAvailable(
+                "Thiếu thư viện 'cryptography'. Vui lòng cài đặt bằng `pip install cryptography`."
+            ) from exc
+        raise
 
 
 def _split_owner_table(raw_name: str, default_owner: str) -> tuple[str, str]:
