@@ -50,7 +50,10 @@ pyinstaller main.py ^
   --hidden-import core.i18n ^
   --hidden-import core.history ^
   --hidden-import core.templates ^
-  --hidden-import cryptography
+  --hidden-import cryptography ^
+  --hidden-import cryptography.x509 ^
+  --collect-submodules cryptography ^
+  --collect-data cryptography
 
 echo.
 echo === DONE ===

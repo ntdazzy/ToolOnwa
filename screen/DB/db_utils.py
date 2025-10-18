@@ -12,8 +12,10 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 try:
     import cryptography  # type: ignore  # noqa: F401  # ensure thin mode dependency is bundled
+    from cryptography import x509 as _x509  # type: ignore  # noqa: F401
 except Exception:
     cryptography = None  # type: ignore
+    _x509 = None  # type: ignore
 
 from screen.DB import cmd_sql_plus
 
