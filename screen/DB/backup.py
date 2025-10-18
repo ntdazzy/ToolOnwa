@@ -10,7 +10,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from screen.DB import db_utils
 from screen.DB.widgets import DataGrid, LoadingPopup
@@ -48,6 +48,9 @@ class BackupRestoreBase(tk.Toplevel):
         self._column_meta: Dict[str, dict] = {}
         self._loader: Optional[LoadingPopup] = None
         self._current_table_label: str = "..."
+        self._metadata_cache: Dict[str, Dict[str, Any]] = {}
+        self._metadata_token: int = 0
+        self._metadata_loading: bool = False
 
         self.var_search = tk.StringVar()
         self.var_selected_table = tk.StringVar()
@@ -162,6 +165,8 @@ class BackupRestoreBase(tk.Toplevel):
             self._columns.clear()
             self._column_meta.clear()
             self._current_table_label = "..."
+            self._set_metadata_loading(False)
+            self.on_table_ready("")
 
     def _filter_tables(self):
         """Lọc danh sách bảng theo từ khóa tìm kiếm."""
@@ -190,6 +195,7 @@ class BackupRestoreBase(tk.Toplevel):
             self._columns.clear()
             self._column_meta.clear()
             self._current_table_label = "..."
+            self._set_metadata_loading(False)
             self.on_table_ready("")
 
     def _handle_table_select(self, _event=None):
@@ -209,17 +215,88 @@ class BackupRestoreBase(tk.Toplevel):
         self._load_table_metadata(item)
 
     def _load_table_metadata(self, item: Dict[str, str]):
-        """Đọc metadata của bảng được chọn."""
+        """Đọc metadata của bảng được chọn (kèm cache và loading popup)."""
         if not self.conn:
             return
-        try:
-            columns = db_utils.fetch_table_columns(self.conn, item["full"], self.current_owner)
-        except Exception as exc:
-            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("backup.msg.metadata_error", error=str(exc)), parent=self)
+        table_key = item["full"]
+        self._columns.clear()
+        self._column_meta.clear()
+        self._set_metadata_loading(True)
+
+        cached = self._metadata_cache.get(table_key)
+        if cached:
+            self._metadata_token += 1
+            token = self._metadata_token
+            self._hide_loading()
+            self._apply_table_metadata(item, cached["columns"], token)
             return
+
+        self._metadata_token += 1
+        token = self._metadata_token
+        self._hide_loading()
+        self._show_loading(self._t("common.loading_columns", table=item["display"]))
+
+        def worker():
+            try:
+                columns = db_utils.fetch_table_columns(self.conn, table_key, self.current_owner)
+            except Exception as exc:
+                self.after(0, lambda: self._handle_metadata_error(item, exc, token))
+                return
+            self._metadata_cache[table_key] = {"columns": columns}
+            self.after(0, lambda: self._apply_table_metadata(item, columns, token))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_table_metadata(
+        self,
+        item: Dict[str, str],
+        columns: List[Dict[str, Any]],
+        token: Optional[int] = None,
+    ):
+        """Áp dụng metadata sau khi tải thành công."""
+        if token is not None and token != self._metadata_token:
+            return
+        if not self._active_table or self._active_table["full"] != item["full"]:
+            return
+        self._hide_loading()
         self._columns = [c["column_name"] for c in columns]
         self._column_meta = {c["column_name"]: c for c in columns}
+        self._set_metadata_loading(False)
         self.on_table_ready(item["full"])
+
+    def _handle_metadata_error(self, item: Dict[str, str], exc: Exception, token: Optional[int]):
+        """Thông báo lỗi khi không thể tải metadata."""
+        if token is not None and token != self._metadata_token:
+            return
+        if not self._active_table or self._active_table["full"] != item["full"]:
+            return
+        self._hide_loading()
+        self._set_metadata_loading(False)
+        messagebox.showerror(
+            self._t(APP_TITLE_KEY),
+            self._t("backup.msg.metadata_error", error=str(exc)),
+            parent=self,
+        )
+        self.on_table_ready("")
+
+    def _set_metadata_loading(self, loading: bool) -> None:
+        """Bật/tắt khả năng tương tác khi đang tải metadata."""
+        self._metadata_loading = loading
+        state = "disabled" if loading else "normal"
+        try:
+            self.list_tables.configure(state=state)
+        except tk.TclError:
+            pass
+        try:
+            self.ent_search.configure(state=state)
+        except tk.TclError:
+            pass
+        self.on_metadata_loading(loading)
+
+    def on_metadata_loading(self, loading: bool) -> None:
+        """Hook để lớp con tùy biến việc bật/tắt nút khi metadata đang tải."""
+        # Mặc định không làm gì, lớp con có thể override.
+        return
 
     def on_table_ready(self, table: str):
         """Hook cho lớp con khi metadata đã sẵn sàng."""
@@ -414,6 +491,23 @@ class BackupWindow(BackupRestoreBase):
         parent.rowconfigure(4, weight=1)
         parent.rowconfigure(6, weight=1)
 
+    def on_metadata_loading(self, loading: bool) -> None:
+        """Vô hiệu hóa các nút thao tác khi đang tải metadata."""
+        super().on_metadata_loading(loading)
+        state = "disabled" if loading else "normal"
+        widgets = [
+            getattr(self, "ent_backup", None),
+            getattr(self, "btn_refresh_sql", None),
+            getattr(self, "btn_execute", None),
+        ]
+        for widget in widgets:
+            if widget is None:
+                continue
+            try:
+                widget.configure(state=state)
+            except tk.TclError:
+                continue
+
     def on_table_ready(self, table: str):
         """Cập nhật thông tin khi bảng nguồn đã sẵn sàng."""
         if not table:
@@ -514,6 +608,23 @@ class RestoreFromBackupWindow(BackupRestoreBase):
 
         parent.rowconfigure(4, weight=1)
         parent.rowconfigure(6, weight=1)
+
+    def on_metadata_loading(self, loading: bool) -> None:
+        """Disable các nút khi metadata chưa sẵn sàng."""
+        super().on_metadata_loading(loading)
+        state = "disabled" if loading else "normal"
+        widgets = [
+            getattr(self, "ent_backup", None),
+            getattr(self, "btn_refresh_sql", None),
+            getattr(self, "btn_execute", None),
+        ]
+        for widget in widgets:
+            if widget is None:
+                continue
+            try:
+                widget.configure(state=state)
+            except tk.TclError:
+                continue
 
     def on_table_ready(self, table: str):
         """Đề xuất tên backup và sinh câu SQL mặc định."""
@@ -642,6 +753,27 @@ class RestoreFromCSVWindow(BackupRestoreBase):
 
         parent.rowconfigure(3, weight=1)
         parent.rowconfigure(5, weight=1)
+
+    def on_metadata_loading(self, loading: bool) -> None:
+        """Khóa các thao tác nhập CSV khi metadata chưa sẵn sàng."""
+        super().on_metadata_loading(loading)
+        state = "disabled" if loading else "normal"
+        widgets = [
+            getattr(self, "btn_import_csv", None),
+            getattr(self, "btn_clear_preview", None),
+            getattr(self, "btn_execute_restore", None),
+        ]
+        for widget in widgets:
+            if widget is None:
+                continue
+            try:
+                widget.configure(state=state)
+            except tk.TclError:
+                continue
+        try:
+            self.preview_grid.tree.configure(state="normal" if not loading else "disabled")
+        except (AttributeError, tk.TclError):
+            pass
 
     def on_table_ready(self, table: str):
         """Chuẩn bị lại dữ liệu xem trước khi bảng đích thay đổi."""
@@ -809,6 +941,86 @@ class RestoreFromCSVWindow(BackupRestoreBase):
             self.lbl_file.configure(text=self._t("backup.label.no_file"))
         if hasattr(self, "preview_grid"):
             self.preview_grid.apply_language()
+
+
+class BackupModeDialog(tk.Toplevel):
+    """Hộp thoại chọn chế độ Backup/Restore."""
+
+    def __init__(self, parent: tk.Widget):
+        super().__init__(parent)
+        self.result: Optional[str] = None
+        self.title(i18n.translate("backup.choice.title"))
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        frame = ttk.Frame(self, padding=16)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(
+            frame,
+            text=i18n.translate("backup.choice.message"),
+            wraplength=360,
+            justify="left",
+        ).pack(fill="x", pady=(0, 12))
+
+        ttk.Button(
+            frame,
+            text=i18n.translate("backup.choice.backup"),
+            command=lambda: self._set_choice("backup"),
+        ).pack(fill="x", pady=4)
+        ttk.Button(
+            frame,
+            text=i18n.translate("backup.choice.restore_backup"),
+            command=lambda: self._set_choice("restore_backup"),
+        ).pack(fill="x", pady=4)
+        ttk.Button(
+            frame,
+            text=i18n.translate("backup.choice.restore_csv"),
+            command=lambda: self._set_choice("restore_csv"),
+        ).pack(fill="x", pady=(4, 12))
+        ttk.Button(
+            frame,
+            text=i18n.translate("common.cancel"),
+            command=self._cancel,
+        ).pack(fill="x")
+
+        self.bind("<Escape>", lambda _e: self._cancel())
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self._center_over_parent(parent)
+
+    def _center_over_parent(self, parent: tk.Widget):
+        try:
+            self.update_idletasks()
+            px = parent.winfo_rootx()
+            py = parent.winfo_rooty()
+            pw = parent.winfo_width()
+            ph = parent.winfo_height()
+            w = self.winfo_width()
+            h = self.winfo_height()
+            if w <= 1 or h <= 1:
+                w = self.winfo_reqwidth()
+                h = self.winfo_reqheight()
+            x = px + (pw - w) // 2
+            y = py + (ph - h) // 2
+            self.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+    def _set_choice(self, choice: str):
+        self.result = choice
+        self.destroy()
+
+    def _cancel(self):
+        self.result = None
+        self.destroy()
+
+
+def ask_backup_mode(parent: tk.Widget) -> Optional[str]:
+    """Hiển thị hộp thoại chọn chế độ Backup/Restore."""
+    dialog = BackupModeDialog(parent)
+    parent.wait_window(dialog)
+    return dialog.result
 
 
 def open_backup_window(parent: tk.Widget, connection: Dict[str, str]):

@@ -8,7 +8,7 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from screen.DB import db_utils
 from screen.DB.widgets import ColumnOrderDialog, DataGrid, LoadingPopup
@@ -45,10 +45,13 @@ class UpdateWindow(tk.Toplevel):
         self._draft_history_sql: str = ""
         self._loader: Optional[LoadingPopup] = None
         self._current_table_label: str = "..."
+        self._metadata_cache: Dict[str, Dict[str, Any]] = {}
+        self._metadata_token: int = 0
 
         ACTIVE_WINDOWS.append(self)
 
         self._build_ui()
+        self._set_controls_enabled(False)
         self._lang_listener = self._handle_language_change
         i18n.add_listener(self._lang_listener)
         self._apply_language()
@@ -245,8 +248,16 @@ class UpdateWindow(tk.Toplevel):
             self._on_select_table()
         else:
             self._active_table = None
+            self._columns = []
+            self._column_meta.clear()
+            self._pk_columns = []
+            self.grid.clear()
+            self.grid.configure_columns([])
+            self.txt_sql.delete("1.0", tk.END)
+            self.txt_condition.delete("1.0", tk.END)
             self._current_table_label = "..."
             self._set_sql_label("...")
+            self._set_controls_enabled(False)
 
     # ------------------------------------------------------------------
     def _filter_tables(self):
@@ -271,11 +282,16 @@ class UpdateWindow(tk.Toplevel):
             self._on_select_table()
         else:
             self._active_table = None
+            self._columns = []
+            self._column_meta.clear()
+            self._pk_columns = []
             self.grid.clear()
+            self.grid.configure_columns([])
             self.txt_sql.delete("1.0", tk.END)
             self.txt_condition.delete("1.0", tk.END)
             self._current_table_label = "..."
             self._set_sql_label("...")
+            self._set_controls_enabled(False)
 
     def _on_select_table(self, _event=None):
         """Xử lý khi chọn bảng mới trong danh sách."""
@@ -292,29 +308,122 @@ class UpdateWindow(tk.Toplevel):
         self._load_table_metadata(item)
 
     def _load_table_metadata(self, item: Dict[str, str]):
-        """Nạp thông tin cột và khóa chính của bảng đang chọn."""
+        """Nạp thông tin cột và khóa chính của bảng đang chọn (có cache & popup)."""
         if not self.conn:
             return
-        try:
-            columns = db_utils.fetch_table_columns(self.conn, item["full"], self.current_owner)
-            pk_cols = db_utils.fetch_primary_keys(self.conn, item["full"], self.current_owner)
-        except Exception as exc:
-            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("update.msg.metadata_error", error=str(exc)), parent=self)
+        table_key = item["full"]
+        self._columns = []
+        self._column_meta.clear()
+        self._pk_columns = []
+        self._cached_rows.clear()
+        self.grid.clear()
+        self.grid.configure_columns([])
+        self.txt_sql.delete("1.0", tk.END)
+        self.txt_condition.delete("1.0", tk.END)
+        self._set_sql_label(item["display"])
+        self._set_controls_enabled(False)
+
+        cached = self._metadata_cache.get(table_key)
+        if cached:
+            self._metadata_token += 1
+            token = self._metadata_token
+            self._hide_loading()
+            self._apply_table_metadata(item, cached["columns"], cached["pk"], token)
             return
+
+        self._metadata_token += 1
+        token = self._metadata_token
+        self._hide_loading()
+        self._show_loading(self._t("common.loading_columns", table=item["display"]))
+
+        def worker():
+            try:
+                columns = db_utils.fetch_table_columns(self.conn, table_key, self.current_owner)
+                pk_cols = db_utils.fetch_primary_keys(self.conn, table_key, self.current_owner)
+            except Exception as exc:
+                self.after(0, lambda: self._handle_metadata_error(item, exc, token))
+                return
+            self._metadata_cache[table_key] = {"columns": columns, "pk": pk_cols}
+            self.after(0, lambda: self._apply_table_metadata(item, columns, pk_cols, token))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_table_metadata(
+        self,
+        item: Dict[str, str],
+        columns: List[Dict[str, Any]],
+        pk_cols: List[str],
+        token: Optional[int] = None,
+    ):
+        """Áp dụng metadata đã tải vào lưới."""
+        if token is not None and token != self._metadata_token:
+            return
+        if not self._active_table or self._active_table["full"] != item["full"]:
+            return
+        self._hide_loading()
         self._columns = [col["column_name"] for col in columns]
         self._column_meta = {col["column_name"]: col for col in columns}
         self._pk_columns = pk_cols
-        self.grid.configure_columns(self._columns)
+        if self._columns:
+            self.grid.configure_columns(self._columns)
         self.grid.clear()
-        self.grid.append_dict({})
+        if self._columns:
+            self.grid.append_dict({})
         self._cached_rows.clear()
         self._set_sql_label(item["display"])
+        self._set_controls_enabled(True)
+
+    def _handle_metadata_error(self, item: Dict[str, str], exc: Exception, token: Optional[int]):
+        """Xử lý khi tải metadata xảy ra lỗi."""
+        if token is not None and token != self._metadata_token:
+            return
+        if not self._active_table or self._active_table["full"] != item["full"]:
+            return
+        self._hide_loading()
+        self._set_controls_enabled(True)
+        self._set_sql_label("...")
+        self._columns = []
+        self._column_meta.clear()
+        self._pk_columns = []
+        self._cached_rows.clear()
+        messagebox.showerror(
+            self._t(APP_TITLE_KEY),
+            self._t("update.msg.metadata_error", error=str(exc)),
+            parent=self,
+        )
 
     def _set_sql_label(self, table_display: str):
         """Cập nhật tiêu đề khung SQL theo tên bảng hiện tại."""
         self._current_table_label = table_display or "..."
         if hasattr(self, "frm_sql"):
             self.frm_sql.configure(text=self._t("update.section.sql", table=self._current_table_label))
+
+    def _set_controls_enabled(self, enabled: bool):
+        """Bật/tắt nhóm nút thao tác phụ thuộc metadata."""
+        state = "normal" if enabled else "disabled"
+        buttons = [
+            getattr(self, "btn_build_sql", None),
+            getattr(self, "btn_save_template", None),
+            getattr(self, "btn_select_template", None),
+            getattr(self, "btn_copy", None),
+            getattr(self, "btn_reorder", None),
+            getattr(self, "btn_execute", None),
+            getattr(self, "btn_clear", None),
+            getattr(self, "btn_import_csv", None),
+            getattr(self, "btn_export_csv", None),
+            getattr(self, "btn_add_row", None),
+        ]
+        for widget in buttons:
+            if widget is None:
+                continue
+            try:
+                widget.config(state=state)
+            except tk.TclError:
+                continue
+        try:
+            self.grid.tree.configure(state="normal" if enabled else "disabled")
+        except tk.TclError:
+            pass
 
     # ------------------------------------------------------------------
     def _generate_sql(self):

@@ -605,18 +605,12 @@ class ToolVIP(tk.Tk):
         info = self._collect_connection_info()
         if not info:
             return
-        choice = messagebox.askyesnocancel(APP_TITLE, self._t("main.ask.backup_mode"), parent=self)
-        if choice is None:
-            return
-        if choice:
+        selection = backup_screen.ask_backup_mode(self)
+        if selection == "backup":
             backup_screen.open_backup_window(self, info)
-            return
-        restore_choice = messagebox.askyesnocancel(APP_TITLE, self._t("main.ask.restore_mode"), parent=self)
-        if restore_choice is None:
-            return
-        if restore_choice:
+        elif selection == "restore_backup":
             backup_screen.open_restore_from_backup_window(self, info)
-        else:
+        elif selection == "restore_csv":
             backup_screen.open_restore_from_csv_window(self, info)
 
 
@@ -648,7 +642,6 @@ class ToolVIP(tk.Tk):
 
 def main(): app=ToolVIP(); app.mainloop()
 if __name__=="__main__": main()
-
 
 
 

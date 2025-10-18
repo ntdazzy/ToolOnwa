@@ -29,6 +29,58 @@ def _normalize_headers(headers: Sequence[str]) -> List[str]:
     return [str(h).strip() for h in headers]
 
 
+_excel_style_initialized = False
+
+
+def _ensure_excel_style(master: Optional[tk.Widget] = None) -> None:
+    """Đảm bảo Treeview hiển thị theo phong cách dạng lưới giống Excel."""
+    global _excel_style_initialized
+    if _excel_style_initialized:
+        return
+    try:
+        style = ttk.Style(master)
+        try:
+            if style.theme_use() == "default":
+                style.theme_use("clam")
+        except tk.TclError:
+            pass
+        base_config: Dict[str, Any] = {
+            "background": "#FFFFFF",
+            "fieldbackground": "#FFFFFF",
+            "foreground": "#111827",
+            "rowheight": 24,
+        }
+        border_config: Dict[str, Any] = {
+            "borderwidth": 1,
+            "relief": "solid",
+            "bordercolor": "#CBD5F5",
+            "lightcolor": "#CBD5F5",
+            "darkcolor": "#CBD5F5",
+        }
+        style.configure("Excel.Treeview", **base_config, **border_config)
+        style.configure(
+            "Excel.Treeview.Heading",
+            background="#F1F5F9",
+            foreground="#0F172A",
+            borderwidth=1,
+            relief="solid",
+        )
+        try:
+            style.map(
+                "Excel.Treeview",
+                background=[("selected", "#DBEAFE")],
+                foreground=[("selected", "#0F172A")],
+            )
+            style.map(
+                "Excel.Treeview.Heading",
+                background=[("active", "#E2E8F0"), ("pressed", "#CBD5F5")],
+            )
+        except tk.TclError:
+            pass
+    finally:
+        _excel_style_initialized = True
+
+
 class LoadingPopup:
     """Popup hiển thị trạng thái đang xử lý với thanh tiến trình."""
 
@@ -105,9 +157,14 @@ class EditableTreeview(ttk.Treeview):
         self.bind("<Control-c>", self._copy_selection)
         self.bind("<Control-a>", self._select_all)
         self.bind("<Control-v>", self._paste_clipboard)
+        self.bind("<<TreeviewSelect>>", lambda _e: self._highlight_selection(), add="+")
 
         self._dragging = False
         self._last_click_region = ""
+        self._editing_tag = "grid-row-editing"
+        self.tag_configure("grid-row-even", background="#FFFFFF")
+        self.tag_configure("grid-row-odd", background="#F8FAFF")
+        self.tag_configure(self._editing_tag, background="#E0ECFF")
 
     # ---- editing -------------------------------------------------
     def _on_double_click(self, event):
@@ -131,11 +188,11 @@ class EditableTreeview(ttk.Treeview):
         region = self.identify("region", event.x, event.y)
         self._last_click_region = region
         if region != "cell":
-            self._close_editor()
+            self._save_editor()
 
     def _on_release(self, _event):
         if self._last_click_region != "cell":
-            self._close_editor()
+            self._save_editor()
 
     def _open_editor(self, item: str, column: str):
         if not item or not column:
@@ -157,6 +214,7 @@ class EditableTreeview(ttk.Treeview):
         self._editor = editor
         self._editor_item = item
         self._editor_column = column
+        self._flag_editing_row(item, True)
 
     def _save_editor(self):
         if not self._editor:
@@ -165,13 +223,19 @@ class EditableTreeview(ttk.Treeview):
         if self._editor_item and self._editor_column:
             self.set(self._editor_item, self._editor_column, value)
         self._close_editor()
+        self.refresh_striping()
 
     def _close_editor(self, *_):
+        item = self._editor_item
         if self._editor:
             self._editor.destroy()
         self._editor = None
         self._editor_item = None
         self._editor_column = None
+        if item:
+            self._clear_editing_tags(item)
+        else:
+            self.refresh_striping()
 
     # ---- clipboard ------------------------------------------------
     def _select_all(self, _event):
@@ -224,6 +288,7 @@ class EditableTreeview(ttk.Treeview):
             for idx, col in enumerate(headers):
                 values[col] = parts[idx] if idx < len(parts) else ""
             self._append_row(values)
+        self.refresh_striping()
         return "break"
 
     # ---- data helpers ---------------------------------------------
@@ -234,26 +299,79 @@ class EditableTreeview(ttk.Treeview):
             self.heading(col, text=col, anchor="w")
             self.column(col, width=120, minwidth=80, stretch=True, anchor="w")
         self._close_editor()
+        self.refresh_striping()
 
     def clear(self):
         self._close_editor()
         for item in self.get_children(""):
             self.delete(item)
+        self.refresh_striping()
 
     def set_data(self, rows: Iterable[Dict[str, Any]]):
         self.clear()
         for idx, row in enumerate(rows):
             values = [str(row.get(col, "")) if row.get(col) is not None else "" for col in self["columns"]]
             self.insert("", "end", iid=f"row{idx}", values=values)
+        self.refresh_striping()
 
     def append_dict(self, row: Dict[str, Any]):
         self._append_row(row)
+        self.refresh_striping()
 
     def _append_row(self, row: Dict[str, Any]):
         iid = self.insert("", "end")
         for col in self["columns"]:
             val = row.get(col, "")
             self.set(iid, col, "" if val is None else str(val))
+        return iid
+
+    def refresh_striping(self):
+        """Áp dụng màu nền xen kẽ giúp lưới dễ theo dõi."""
+        editing_item = self._editor_item
+        for idx, item in enumerate(self.get_children("")):
+            if editing_item and item == editing_item:
+                continue
+            tags = [t for t in self.item(item, "tags") if t != self._editing_tag]
+            tags = [t for t in tags if t not in ("grid-row-even", "grid-row-odd")]
+            tags.append("grid-row-even" if idx % 2 else "grid-row-odd")
+            self.item(item, tags=tags)
+
+    def _flag_editing_row(self, item: str, editing: bool):
+        """Đánh dấu hàng đang chỉnh sửa để giữ highlight ngay cả khi zebra chạy lại."""
+        if not item:
+            return
+        tags = [t for t in self.item(item, "tags") if t not in ("grid-row-even", "grid-row-odd", self._editing_tag)]
+        try:
+            idx = self.index(item)
+        except tk.TclError:
+            idx = 0
+        zebra = "grid-row-even" if idx % 2 else "grid-row-odd"
+        tags.append(zebra)
+        if editing:
+            tags.append(self._editing_tag)
+        self.item(item, tags=tags)
+
+    def _clear_editing_tags(self, item: Optional[str] = None):
+        if item:
+            items = [item]
+        else:
+            items = list(self.get_children(""))
+        for iid in items:
+            tags = [t for t in self.item(iid, "tags") if t != self._editing_tag]
+            tags = [t for t in tags if t not in ("grid-row-even", "grid-row-odd")]
+            try:
+                idx = self.index(iid)
+            except tk.TclError:
+                idx = 0
+            tags.append("grid-row-even" if idx % 2 else "grid-row-odd")
+            self.item(iid, tags=tags)
+
+    def _highlight_selection(self):
+        for item in self.selection():
+            try:
+                self.see(item)
+            except tk.TclError:
+                continue
 
     def get_all(self) -> List[Dict[str, Any]]:
         result = []
@@ -292,6 +410,7 @@ class EditableTreeview(ttk.Treeview):
             for col_index, col in enumerate(self["columns"]):
                 values[col] = data_row[col_index] if col_index < len(data_row) else ""
             self._append_row(values)
+        self.refresh_striping()
 
 
 class DataGrid(ttk.Frame):
@@ -301,7 +420,12 @@ class DataGrid(ttk.Frame):
 
     def __init__(self, master: tk.Widget, **kwargs):
         super().__init__(master)
+        _ensure_excel_style(self)
         self.tree = EditableTreeview(self, **kwargs)
+        try:
+            self.tree.configure(style="Excel.Treeview")
+        except tk.TclError:
+            pass
 
         vsb = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
@@ -331,6 +455,7 @@ class DataGrid(ttk.Frame):
         sel = self.tree.selection()
         for item in sel:
             self.tree.delete(item)
+        self.tree.refresh_striping()
 
     # proxied helpers
     def configure_columns(self, columns: Sequence[str]):
@@ -544,24 +669,45 @@ class ColumnOrderDialog(tk.Toplevel):
     def __init__(self, parent: tk.Widget, columns: Sequence[str]):
         super().__init__(parent)
         self.title(_t("grid.order.title"))
-        self.geometry("320x420")
-        self.minsize(300, 360)
+        self.geometry("360x460")
+        self.minsize(340, 380)
         self.transient(parent)
         self.grab_set()
 
         self._initial = list(columns)
         self._columns = list(columns)
+        self._flash_after_id: Optional[str] = None
 
         ttk.Label(self, text=_t("grid.order.hint")).pack(padx=12, pady=(12, 6), anchor="w")
 
-        self.listbox = tk.Listbox(self, selectmode=tk.SINGLE, activestyle="none")
-        self.listbox.pack(fill="both", expand=True, padx=12, pady=6)
-        for col in self._columns:
-            self.listbox.insert(tk.END, col)
+        container = ttk.Frame(self)
+        container.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+        container.columnconfigure(0, weight=1)
+        container.rowconfigure(0, weight=1)
+
+        self.listbox = tk.Listbox(container, selectmode=tk.SINGLE, activestyle="dotbox", exportselection=False)
+        self.listbox.grid(row=0, column=0, sticky="nsew")
+        self._populate_listbox()
+
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.listbox.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.listbox.configure(yscrollcommand=scrollbar.set)
+
+        move_panel = ttk.Frame(container)
+        move_panel.grid(row=0, column=2, sticky="ns", padx=(6, 0))
+        ttk.Button(move_panel, text=_t("grid.order.move_up"), command=lambda: self._move_selected(-1), width=14).pack(
+            pady=(0, 8)
+        )
+        ttk.Button(move_panel, text=_t("grid.order.move_down"), command=lambda: self._move_selected(1), width=14).pack()
 
         self.listbox.bind("<ButtonPress-1>", self._on_press)
         self.listbox.bind("<B1-Motion>", self._on_motion)
         self.listbox.bind("<ButtonRelease-1>", self._on_release)
+        self.listbox.bind("<Double-Button-1>", lambda _e: self._move_selected(1))
+        self.listbox.bind("<Control-Up>", lambda _e: (self._move_selected(-1), "break"))
+        self.listbox.bind("<Control-Down>", lambda _e: (self._move_selected(1), "break"))
+        self.listbox.bind("<KeyPress-U>", lambda _e: (self._move_selected(-1), "break"))
+        self.listbox.bind("<KeyPress-D>", lambda _e: (self._move_selected(1), "break"))
 
         btns = ttk.Frame(self)
         btns.pack(fill="x", padx=12, pady=(0, 12))
@@ -574,6 +720,12 @@ class ColumnOrderDialog(tk.Toplevel):
 
         self.result: Optional[List[str]] = None
 
+    def _populate_listbox(self):
+        """Đổ dữ liệu cột kèm số thứ tự vào listbox."""
+        self.listbox.delete(0, tk.END)
+        for idx, col in enumerate(self._columns, start=1):
+            self.listbox.insert(tk.END, f"{idx}. {col}")
+
     def _on_press(self, event):
         """Ghi nhận vị trí dòng được kéo."""
         self._drag_index = self.listbox.nearest(event.y)
@@ -585,12 +737,13 @@ class ColumnOrderDialog(tk.Toplevel):
         new_index = self.listbox.nearest(event.y)
         if new_index == self._drag_index:
             return
-        value = self.listbox.get(self._drag_index)
-        self.listbox.delete(self._drag_index)
-        self.listbox.insert(new_index, value)
+        value = self._columns.pop(self._drag_index)
+        self._columns.insert(new_index, value)
+        self._populate_listbox()
         self.listbox.selection_clear(0, tk.END)
         self.listbox.selection_set(new_index)
         self._drag_index = new_index
+        self._flash_row(new_index)
 
     def _on_release(self, _event):
         """Kết thúc thao tác kéo thả."""
@@ -598,16 +751,64 @@ class ColumnOrderDialog(tk.Toplevel):
 
     def _reset(self):
         """Khôi phục lại thứ tự cột ban đầu."""
-        self.listbox.delete(0, tk.END)
-        for col in self._initial:
-            self.listbox.insert(tk.END, col)
+        self._columns = list(self._initial)
+        self._populate_listbox()
+        if self._columns:
+            self.listbox.selection_set(0)
+            self._flash_row(0)
 
     def _accept(self):
-        """Xác nhận lựa chọn và trả về danh sách cột mới."""
-        self.result = [self.listbox.get(idx) for idx in range(self.listbox.size())]
+        """Xác nhận và trả về danh sách cột theo thứ tự mới."""
+        self.result = list(self._columns)
         self.destroy()
 
     def _cancel(self):
         """Đóng dialog và không thay đổi thứ tự cột."""
         self.result = None
         self.destroy()
+
+    def _move_selected(self, offset: int):
+        """Di chuyển phần tử được chọn lên/xuống."""
+        if offset == 0 or not self._columns:
+            return
+        selection = self.listbox.curselection()
+        if not selection:
+            return
+        index = selection[0]
+        target = index + offset
+        if target < 0 or target >= len(self._columns):
+            return
+        self._columns[index], self._columns[target] = self._columns[target], self._columns[index]
+        self._populate_listbox()
+        self.listbox.selection_set(target)
+        self.listbox.see(target)
+        self._flash_row(target)
+
+    def _flash_row(self, index: int):
+        """Tạo hiệu ứng highlight nhẹ tại vị trí mới."""
+        if index < 0 or index >= len(self._columns):
+            return
+        if self._flash_after_id:
+            try:
+                self.after_cancel(self._flash_after_id)
+            except Exception:
+                pass
+            finally:
+                self._flash_after_id = None
+
+        colors = ["#E0ECFF", "#FFFFFF", "#E0ECFF", "#FFFFFF"]
+
+        def _animate(step: int = 0):
+            if step >= len(colors):
+                try:
+                    self.listbox.itemconfig(index, background="")
+                except Exception:
+                    pass
+                return
+            try:
+                self.listbox.itemconfig(index, background=colors[step])
+            except Exception:
+                return
+            self._flash_after_id = self.after(70, _animate, step + 1)
+
+        _animate()

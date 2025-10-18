@@ -1,24 +1,19 @@
-hãy rà soát các file py
-kiểm tra logic, và phân tích tool
+Bạn là trợ lý lập trình, làm việc trên dự án Tkinter “ToolONWA VIP v1.0”. Nhiệm vụ:
+1. Chỉnh sửa và tối ưu lại logic load bảng và các cột :
+    - screen/DB/insert.py, update.py, backup.py
+         • Thay đổi cơ chế load cột của 1 bảng trong dadataabase, hiện tại đang load hết tất cả các cột của tất cả các bảng trong database lên, khiến cho thao tác trên màn hình rất lag
+         • tối ưu, cải thiện UI/UX cho màn  hình thay đổi vị trí cột của bảng khi nhấn vào nút thay đổi cột, nếu có thư viện nào tạo animation hoặc hiệu năng khi kéo thả cột thì tôi muốn sử dụng
+         • Đảm bảo mọi file dùng UTF-8, không xuất hiện ký tự bị mã hóa.
+         • Bổ sung đầy đủ key dịch cho tất cả các màn hình vào core/i18n.py.
+         • Tối ưu hiệu năng của các màn hình đó khi mở lên
+         • Khi nhấn vào bảng bất kì thì cũng phải có popup loading để load cột
+         • Tôi muốn phần bảng trong các màn hình insert.py, update.py, backup.py hiển thị giống excel, hiện tại không có bo viền các cell trong bảng
+         • Fix lỗi khi nhập giá trị vào 1 cell trên bảng để tạo câu insert hoặc update thì outfocus là giá trị đó bị mất, kiểm tra ở cả màn hình backup nếu có
 
-sau đó 
-- đưa ra các cải thiện về trải nghiệm người dùng
-- các tính năng mới phù hợp nhu cầu
-- kiểm tra các lỗi đang có trong source
-- ở nút RDS infomation, tôi muốn tạo một màn hình giống như trong ảnh tôi gửi , code tôi đã có sẵn và muốn bạn chỉnh sửa lại như sau :
-   1. Bỏ tính năng connect, bây giờ chỉ có thể xem và copy paste hoặc ip hoặc username 
-   2. khi nhấn douple click vào một host trên list thì sẽ mở một màn hình, giống như màn hình edit nhưng màn hình này chỉ có thể xem, đồng thời ở các field như Host/IP, Username, Password đều sẽ kèm theo nút copy để cho người dùng copy, password luôn hiển thị chứ không chuyển qua dấu * 
-   3. khi nhấn double click vào thì màn hình đó sẽ kèm theo nút edit, nhấn nút edit sẽ hiển thị màn hình edit, sau khi chỉnh sửa và lưu thì sẽ cập nhật lại danh sách 
-   4. căn chỉnh lại width của màn hình đó cho nhỏ lại 
-   5. bỏ tính năng connect trong màn hình này
-- kiểm tra và thay thế comment tiếng anh trong source qua tiếng việt 
-- ở đầu mỗi hàm thì hãy bổ sung comment tóm tắt xử lý của hàm đó trong toàn bộ source
-- đồng bộ icon của các màn hình và popup là logo.icon trong folder
-- thay đổi font chữ của tool thành font chữ có trong folder fonts nếu có thể , trường hợp không thể thì giữ nguyên như hiện tại 
-- ở màn hình main.py, khi đổi ngôn ngữ là tiếng nhật thì tất cả các màn hình con, kèm popup đều phải đổi qua tiếng nhật
-- bỏ nút đổi ngôn ngữ ở màn hình log_viewer.py , và sử dụng ngôn ngữ được set ở màn hình main.py
-- hiện tại khi đổi qua ngôn ngữ tiếng nhật thì chỉ 1 số mục chỉ đổi qua tiếng nhật, còn lại vẫn ở tiếng việt, hãy tham khảo xử lý ở màn hình log_viewer.py và sửa tất cả các màn hình còn lại sao cho đồng bộ
-- bạn hãy trả lời tôi bằn tiếng việt nhé 
+
+2. Cải thiện logic khi nhấn vào nút backup/restore thay vì phải nhấn nhiều lần như hiện tại để vào được màn hình mong muốn
+
+3. Tối ưu, chỉnh sửa một số chữ tiếng việt mất dấu , không đầy đủ dấu
 
 Bạn là trợ lý lập trình, làm việc trên dự án Tkinter “ToolONWA VIP v1.0”. Nhiệm vụ:
 
