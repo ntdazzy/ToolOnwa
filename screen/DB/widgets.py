@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Reusable Tk widgets for Insert/Update screens.
+Bộ widget tái sử dụng cho các màn hình Insert/Update/Backup.
 """
 from __future__ import annotations
 
@@ -8,34 +8,43 @@ import csv
 import tkinter as tk
 from dataclasses import dataclass
 from tkinter import filedialog, messagebox, ttk
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence
+
+from core import i18n
+
+
+def _t(key: str, **kwargs) -> str:
+    """Tra cứu chuỗi i18n phục vụ cho widget dùng chung."""
+    return i18n.translate(key, **kwargs)
 
 
 def _clipboard_set(widget: tk.Widget, text: str) -> None:
+    """Ghi nội dung vào clipboard của widget chỉ định."""
     widget.clipboard_clear()
     widget.clipboard_append(text)
 
 
 def _normalize_headers(headers: Sequence[str]) -> List[str]:
+    """Chuẩn hóa danh sách header thành dạng chuỗi sạch."""
     return [str(h).strip() for h in headers]
 
 
 class LoadingPopup:
-    """
-    Simple modal dialog with an indeterminate progress bar.
-    """
+    """Popup hiển thị trạng thái đang xử lý với thanh tiến trình."""
 
-    def __init__(self, parent: tk.Widget, message: str = "Đang tải..."):
+    def __init__(self, parent: tk.Widget, message: str | None = None):
+        """Khởi tạo popup và căn giữa theo cửa sổ cha."""
         self._parent = parent
         self._window = tk.Toplevel(parent)
         self._window.transient(parent)
-        self._window.title("Loading")
+        self._window.title(_t("widget.loading.title"))
         self._window.resizable(False, False)
         self._window.protocol("WM_DELETE_WINDOW", lambda: None)
 
         frame = ttk.Frame(self._window, padding=16)
         frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text=message, anchor="center").pack(fill="x")
+        display_message = message or _t("widget.loading.message")
+        ttk.Label(frame, text=display_message, anchor="center").pack(fill="x")
         self._progress = ttk.Progressbar(frame, mode="indeterminate", length=220)
         self._progress.pack(fill="x", pady=(12, 0))
         self._progress.start(12)
@@ -60,6 +69,7 @@ class LoadingPopup:
             pass
 
     def close(self):
+        """Đóng popup và giải phóng tài nguyên."""
         try:
             if self._progress:
                 self._progress.stop()
@@ -79,9 +89,7 @@ class LoadingPopup:
 
 
 class EditableTreeview(ttk.Treeview):
-    """
-    Treeview with in-place editing and clipboard support.
-    """
+    """Treeview cho phép chỉnh sửa trực tiếp và thao tác clipboard."""
 
     def __init__(self, master: tk.Widget, **kwargs):
         super().__init__(master, show="headings", selectmode="extended", **kwargs)
@@ -306,26 +314,20 @@ class DataGrid(ttk.Frame):
         self.grid_columnconfigure(0, weight=1)
 
         self._popup = tk.Menu(self, tearoff=False)
-        self._popup.add_command(label="Copy row(s)", command=lambda: self.tree._copy_selection(include_headers=False))
-        self._popup.add_command(label="Copy row(s) + header", command=lambda: self.tree._copy_selection(include_headers=True))
-        self._popup.add_separator()
-        self._popup.add_command(label="Copy all", command=lambda: self.tree.copy_all(include_headers=True))
-        self._popup.add_separator()
-        self._popup.add_command(label="Paste", command=self.tree._paste_clipboard)
-        self._popup.add_command(
-            label="Delete row(s)", command=self._delete_selected, accelerator="Del"
-        )
+        self._configure_menu()
 
         self.tree.bind("<Button-3>", self._show_popup)
         self.tree.bind("<Delete>", lambda e: self._delete_selected() or "break")
 
     def _show_popup(self, event):
+        """Hiển thị menu ngữ cảnh tại vị trí chuột."""
         try:
             self._popup.tk_popup(event.x_root, event.y_root)  # type: ignore[attr-defined]
         finally:
             self._popup.grab_release()
 
     def _delete_selected(self):
+        """Xóa các dòng được chọn trong treeview."""
         sel = self.tree.selection()
         for item in sel:
             self.tree.delete(item)
@@ -344,31 +346,75 @@ class DataGrid(ttk.Frame):
         self.tree.append_dict(row)
 
     def get_all(self) -> List[Dict[str, Any]]:
+        """Trả về toàn bộ dữ liệu hiện có trong lưới."""
         return self.tree.get_all()
 
     def import_csv_dialog(self):
+        """Mở hộp thoại chọn CSV và nạp dữ liệu vào lưới."""
         path = filedialog.askopenfilename(
-            title="Chọn file CSV", filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+            title=_t("grid.dialog.open_csv"),
+            filetypes=[(_t("backup.dialog.csv_files"), "*.csv"), (_t("backup.dialog.all_files"), "*.*")],
+            parent=self,
         )
         if not path:
             return
         try:
             self.tree.import_csv(path)
         except Exception as exc:
-            messagebox.showerror("Tool VIP", f"Lỗi đọc file CSV: {exc}")
+            messagebox.showerror(
+                _t("common.app_title"),
+                _t("grid.msg.read_csv_error", error=str(exc)),
+            )
 
     def export_csv_dialog(self):
+        """Mở hộp thoại lưu CSV và ghi dữ liệu hiện có."""
         path = filedialog.asksaveasfilename(
-            title="Lưu file CSV",
+            title=_t("grid.dialog.save_csv"),
             defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            filetypes=[(_t("backup.dialog.csv_files"), "*.csv"), (_t("backup.dialog.all_files"), "*.*")],
+            parent=self,
         )
         if not path:
             return
         try:
             self.tree.export_csv(path)
         except Exception as exc:
-            messagebox.showerror("Tool VIP", f"Lỗi ghi file CSV: {exc}")
+            messagebox.showerror(
+                _t("common.app_title"),
+                _t("grid.msg.write_csv_error", error=str(exc)),
+            )
+
+    def _configure_menu(self) -> None:
+        """Cấu hình lại thực đơn ngữ cảnh theo ngôn ngữ hiện tại."""
+        try:
+            if self._popup.index("end") is not None:
+                self._popup.delete(0, "end")
+        except tk.TclError:
+            pass
+        self._popup.add_command(
+            label=_t("grid.menu.copy_rows"),
+            command=lambda: self.tree._copy_selection(include_headers=False),
+        )
+        self._popup.add_command(
+            label=_t("grid.menu.copy_rows_header"),
+            command=lambda: self.tree._copy_selection(include_headers=True),
+        )
+        self._popup.add_separator()
+        self._popup.add_command(
+            label=_t("grid.menu.copy_all"),
+            command=lambda: self.tree.copy_all(include_headers=True),
+        )
+        self._popup.add_separator()
+        self._popup.add_command(label=_t("grid.menu.paste"), command=self.tree._paste_clipboard)
+        self._popup.add_command(
+            label=_t("grid.menu.delete_rows"),
+            command=self._delete_selected,
+            accelerator="Del",
+        )
+
+    def apply_language(self) -> None:
+        """Cập nhật lại ngôn ngữ cho menu ngữ cảnh."""
+        self._configure_menu()
 
 
 @dataclass
@@ -378,9 +424,7 @@ class DuplicateRow:
 
 
 class DuplicatePreviewDialog(tk.Toplevel):
-    """
-    Shows duplicates between user data and database data for confirmation.
-    """
+    """Hiển thị dữ liệu trùng để người dùng xác nhận ghi đè."""
 
     def __init__(
         self,
@@ -393,7 +437,7 @@ class DuplicatePreviewDialog(tk.Toplevel):
         db_rows: Sequence[Dict[str, Any]],
     ):
         super().__init__(parent)
-        self.title("Cảnh báo dữ liệu trùng")
+        self.title(_t("grid.duplicate.title"))
         self.geometry("900x520")
         self.minsize(720, 420)
         self.transient(parent)
@@ -403,7 +447,7 @@ class DuplicatePreviewDialog(tk.Toplevel):
 
         info = ttk.Label(
             self,
-            text="Đã có dữ liệu trùng khóa chính. Bạn có muốn ghi đè dữ liệu trong database không?",
+            text=_t("grid.duplicate.message"),
             anchor="w",
             wraplength=860,
         )
@@ -411,14 +455,18 @@ class DuplicatePreviewDialog(tk.Toplevel):
 
         header = ttk.Frame(self)
         header.pack(fill="x", padx=12, pady=(0, 6))
-        ttk.Label(header, text=f"Table: {table_name}", font=("TkDefaultFont", 10, "bold")).pack(side="left")
-        ttk.Label(header, text=f"Khóa chính: {', '.join(pk_columns)}").pack(side="right")
+        ttk.Label(
+            header,
+            text=_t("grid.duplicate.table", table=table_name),
+            font=("TkDefaultFont", 10, "bold"),
+        ).pack(side="left")
+        ttk.Label(header, text=_t("grid.duplicate.pk", keys=", ".join(pk_columns))).pack(side="right")
 
         main = ttk.Panedwindow(self, orient="vertical")
         main.pack(fill="both", expand=True, padx=12, pady=6)
 
-        self.user_grid = self._create_tree(main, columns, title="Data của bạn")
-        self.db_grid = self._create_tree(main, columns, title="Database")
+        self.user_grid = self._create_tree(main, columns, title=_t("grid.duplicate.user_data"))
+        self.db_grid = self._create_tree(main, columns, title=_t("grid.duplicate.database_data"))
 
         self._populate(self.user_grid, user_rows, db_rows, columns, pk_columns)
         self._populate(self.db_grid, db_rows, user_rows, columns, pk_columns)
@@ -426,12 +474,13 @@ class DuplicatePreviewDialog(tk.Toplevel):
         btns = ttk.Frame(self)
         btns.pack(fill="x", padx=12, pady=(0, 12))
         btns.columnconfigure(0, weight=1)
-        ttk.Button(btns, text="Cancel", command=self._cancel, width=12).grid(row=0, column=1, padx=6)
-        ttk.Button(btns, text="OK", command=self._accept, width=12).grid(row=0, column=2, padx=6)
+        ttk.Button(btns, text=_t("common.cancel"), command=self._cancel, width=12).grid(row=0, column=1, padx=6)
+        ttk.Button(btns, text=_t("common.ok"), command=self._accept, width=12).grid(row=0, column=2, padx=6)
 
         self.protocol("WM_DELETE_WINDOW", self._cancel)
 
     def _create_tree(self, parent, columns, title):
+        """Tạo treeview hiển thị dữ liệu với nhãn tiêu đề tương ứng."""
         frame = ttk.Labelframe(parent, text=title, padding=6)
         parent.add(frame, weight=1)
         tree = EditableTreeview(frame, height=8)
@@ -449,6 +498,7 @@ class DuplicatePreviewDialog(tk.Toplevel):
         return tree
 
     def _populate(self, tree: EditableTreeview, rows, other_rows, columns, pk_columns):
+        """Đổ dữ liệu vào treeview và đánh dấu các dòng khác biệt."""
         other_lookup = {self._pk_key(pk_columns, row): row for row in other_rows}
         for idx, row in enumerate(rows):
             values = []
@@ -474,25 +524,26 @@ class DuplicatePreviewDialog(tk.Toplevel):
 
     @staticmethod
     def _pk_key(pk_columns, row):
+        """Tạo khóa tuple từ các cột khóa chính."""
         return tuple("" if row.get(pk) is None else str(row.get(pk)) for pk in pk_columns)
 
     def _accept(self):
+        """Xác nhận ghi đè dữ liệu."""
         self.result = True
         self.destroy()
 
     def _cancel(self):
+        """Hủy thao tác và đóng dialog."""
         self.result = False
         self.destroy()
 
 
 class ColumnOrderDialog(tk.Toplevel):
-    """
-    Allows reordering of column names via drag and drop.
-    """
+    """Cho phép kéo thả để thay đổi thứ tự các cột."""
 
     def __init__(self, parent: tk.Widget, columns: Sequence[str]):
         super().__init__(parent)
-        self.title("Thay đổi vị trí cột")
+        self.title(_t("grid.order.title"))
         self.geometry("320x420")
         self.minsize(300, 360)
         self.transient(parent)
@@ -501,7 +552,7 @@ class ColumnOrderDialog(tk.Toplevel):
         self._initial = list(columns)
         self._columns = list(columns)
 
-        ttk.Label(self, text="Kéo thả để thay đổi vị trí cột").pack(padx=12, pady=(12, 6), anchor="w")
+        ttk.Label(self, text=_t("grid.order.hint")).pack(padx=12, pady=(12, 6), anchor="w")
 
         self.listbox = tk.Listbox(self, selectmode=tk.SINGLE, activestyle="none")
         self.listbox.pack(fill="both", expand=True, padx=12, pady=6)
@@ -514,9 +565,9 @@ class ColumnOrderDialog(tk.Toplevel):
 
         btns = ttk.Frame(self)
         btns.pack(fill="x", padx=12, pady=(0, 12))
-        ttk.Button(btns, text="Reset", command=self._reset).pack(side="left")
-        ttk.Button(btns, text="Cancel", command=self._cancel).pack(side="right", padx=(6, 0))
-        ttk.Button(btns, text="OK", command=self._accept).pack(side="right")
+        ttk.Button(btns, text=_t("common.reset"), command=self._reset).pack(side="left")
+        ttk.Button(btns, text=_t("common.cancel"), command=self._cancel).pack(side="right", padx=(6, 0))
+        ttk.Button(btns, text=_t("common.ok"), command=self._accept).pack(side="right")
 
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self._drag_index: Optional[int] = None
@@ -524,9 +575,11 @@ class ColumnOrderDialog(tk.Toplevel):
         self.result: Optional[List[str]] = None
 
     def _on_press(self, event):
+        """Ghi nhận vị trí dòng được kéo."""
         self._drag_index = self.listbox.nearest(event.y)
 
     def _on_motion(self, event):
+        """Di chuyển dòng theo vị trí chuột khi kéo."""
         if self._drag_index is None:
             return
         new_index = self.listbox.nearest(event.y)
@@ -540,17 +593,21 @@ class ColumnOrderDialog(tk.Toplevel):
         self._drag_index = new_index
 
     def _on_release(self, _event):
+        """Kết thúc thao tác kéo thả."""
         self._drag_index = None
 
     def _reset(self):
+        """Khôi phục lại thứ tự cột ban đầu."""
         self.listbox.delete(0, tk.END)
         for col in self._initial:
             self.listbox.insert(tk.END, col)
 
     def _accept(self):
+        """Xác nhận lựa chọn và trả về danh sách cột mới."""
         self.result = [self.listbox.get(idx) for idx in range(self.listbox.size())]
         self.destroy()
 
     def _cancel(self):
+        """Đóng dialog và không thay đổi thứ tự cột."""
         self.result = None
         self.destroy()

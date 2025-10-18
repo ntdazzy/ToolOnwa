@@ -22,6 +22,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "common.warning": {LANG_VI: "Cảnh báo", LANG_JP: "警告"},
     "common.error": {LANG_VI: "Lỗi", LANG_JP: "エラー"},
     "common.info": {LANG_VI: "Thông báo", LANG_JP: "通知"},
+    "common.reset": {LANG_VI: "Đặt lại", LANG_JP: "リセット"},
     "common.unknown_error": {LANG_VI: "Không rõ lỗi.", LANG_JP: "不明なエラーです。"},
     "common.loading_tables": {LANG_VI: "Đang tải danh sách bảng...", LANG_JP: "テーブル一覧を読み込み中..."},
     "common.msg.connection_error": {
@@ -393,6 +394,39 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "backup.log.restore_done": {
         LANG_VI: "Restore CSV hoàn thành.",
         LANG_JP: "CSV復元が完了しました。",
+    },
+
+    # --- Widgets & DataGrid ---
+    "widget.loading.title": {LANG_VI: "Đang xử lý", LANG_JP: "処理中"},
+    "widget.loading.message": {LANG_VI: "Vui lòng chờ trong giây lát...", LANG_JP: "しばらくお待ちください…"},
+    "grid.dialog.open_csv": {LANG_VI: "Chọn tệp CSV", LANG_JP: "CSVファイルを選択"},
+    "grid.dialog.save_csv": {LANG_VI: "Lưu tệp CSV", LANG_JP: "CSVファイルを保存"},
+    "grid.msg.read_csv_error": {
+        LANG_VI: "Không đọc được CSV: {error}",
+        LANG_JP: "CSVを読み込めません: {error}",
+    },
+    "grid.msg.write_csv_error": {
+        LANG_VI: "Không ghi được CSV: {error}",
+        LANG_JP: "CSVを書き出せません: {error}",
+    },
+    "grid.menu.copy_rows": {LANG_VI: "Sao chép dòng", LANG_JP: "行をコピー"},
+    "grid.menu.copy_rows_header": {LANG_VI: "Sao chép dòng + tiêu đề", LANG_JP: "行とヘッダーをコピー"},
+    "grid.menu.copy_all": {LANG_VI: "Sao chép tất cả", LANG_JP: "すべてコピー"},
+    "grid.menu.paste": {LANG_VI: "Dán", LANG_JP: "貼り付け"},
+    "grid.menu.delete_rows": {LANG_VI: "Xóa dòng", LANG_JP: "行を削除"},
+    "grid.duplicate.title": {LANG_VI: "Cảnh báo dữ liệu trùng", LANG_JP: "重複データの警告"},
+    "grid.duplicate.message": {
+        LANG_VI: "Phát hiện dữ liệu trùng khóa chính. Bạn có muốn ghi đè dữ liệu hiện có?",
+        LANG_JP: "主キーが重複しているデータがあります。既存データを上書きしますか？",
+    },
+    "grid.duplicate.table": {LANG_VI: "Bảng: {table}", LANG_JP: "テーブル: {table}"},
+    "grid.duplicate.pk": {LANG_VI: "Khóa chính: {keys}", LANG_JP: "主キー: {keys}"},
+    "grid.duplicate.user_data": {LANG_VI: "Dữ liệu của bạn", LANG_JP: "入力データ"},
+    "grid.duplicate.database_data": {LANG_VI: "Dữ liệu trong database", LANG_JP: "データベース"},
+    "grid.order.title": {LANG_VI: "Thay đổi vị trí cột", LANG_JP: "列順序を変更"},
+    "grid.order.hint": {
+        LANG_VI: "Kéo thả để thay đổi vị trí cột",
+        LANG_JP: "ドラッグ＆ドロップで列順序を変更",
     },
 
 

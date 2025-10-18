@@ -807,6 +807,8 @@ class RestoreFromCSVWindow(BackupRestoreBase):
             self.btn_execute_restore.configure(text=self._t("backup.btn.execute_restore"))
         if hasattr(self, "lbl_file") and not self.imported_rows:
             self.lbl_file.configure(text=self._t("backup.label.no_file"))
+        if hasattr(self, "preview_grid"):
+            self.preview_grid.apply_language()
 
 
 def open_backup_window(parent: tk.Widget, connection: Dict[str, str]):

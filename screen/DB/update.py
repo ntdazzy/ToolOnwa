@@ -685,6 +685,8 @@ class UpdateWindow(tk.Toplevel):
             self.frm_condition.configure(text=self._t("update.section.condition"))
         if hasattr(self, "frm_sql"):
             self.frm_sql.configure(text=self._t("update.section.sql", table=self._current_table_label))
+        if hasattr(self, "grid"):
+            self.grid.apply_language()
 
     def _t(self, key: str, **kwargs) -> str:
         """Truy xuất chuỗi theo ngôn ngữ hiện tại."""

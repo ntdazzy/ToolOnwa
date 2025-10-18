@@ -628,6 +628,8 @@ class InsertWindow(tk.Toplevel):
             self.btn_add_row.config(text=self._t("insert.btn.add_row"))
         if hasattr(self, "frm_sql"):
             self.frm_sql.config(text=self._t("insert.section.sql", table=self._current_table_label))
+        if hasattr(self, "grid"):
+            self.grid.apply_language()
 
     def _set_icon(self) -> None:
         """Áp dụng biểu tượng cho cửa sổ Insert nếu khả dụng."""
