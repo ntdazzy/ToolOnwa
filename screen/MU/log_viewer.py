@@ -37,6 +37,11 @@ thread_screen_map: dict[str, str] = {}
 logger = logging.getLogger("ToolVIP.LogViewer")
 
 
+MAX_DISPLAY_ROWS = 2000
+EMPTY_MARK = "[ ]"
+CHECK_MARK = "[x]"
+
+
 @dataclass
 class SqlEntry:
     """Thông tin một câu SQL kèm metadata cần thiết."""
@@ -329,6 +334,9 @@ class LogViewerApp:
         # Language handling
         self._key_map = {
             "choose_log": "log.btn.choose",
+            "choose_new": "log.btn.choose_new",
+            "choose_recent": "log.btn.choose_recent",
+            "choose_source": "log.dialog.choose_source",
             "log_type": "log.label.type",
             "sql": "log.option.sql",
             "error": "log.option.error",
@@ -368,6 +376,7 @@ class LogViewerApp:
             "open_folder": "log.btn.open_folder",
             "save_log": "log.btn.save_log",
             "view_saved_logs": "log.btn.view_saved",
+            "delete_log": "log.btn.delete_log",
             "clear": "log.btn.clear",
             "refresh": "log.btn.refresh",
             "reset_filters": "log.btn.reset",
@@ -377,9 +386,20 @@ class LogViewerApp:
             "msg_save_none": "log.msg.save_none",
             "msg_save_success": "log.msg.save_success",
             "msg_no_saved_log": "log.msg.no_saved_log",
+            "msg_delete_confirm": "log.msg.delete_confirm",
+            "msg_delete_done": "log.msg.delete_done",
+            "msg_delete_none": "log.msg.delete_none",
+            "msg_delete_error": "log.msg.delete_error",
+            "msg_no_recent_log": "log.msg.no_recent_log",
+            "msg_choose_prompt": "log.msg.choose_prompt",
             "important_only": "log.label.important_only",
             "saved_logs_title": "log.dialog.saved_title",
             "saved_at": "log.column.saved_at",
+            "recent_title": "log.dialog.recent_title",
+            "filename": "log.column.filename",
+            "path": "log.column.path",
+            "opened_at": "log.column.opened_at",
+            "size": "log.column.size",
         }
 
         def _(key: str, **kwargs) -> str:
@@ -439,7 +459,7 @@ class LogViewerApp:
         self.lbl_log_type = ttk.Label(self.frm_filters, text=self._("log_type"))
         self.lbl_log_type.grid(row=row_index, column=0, sticky="w")
         type_frame = ttk.Frame(self.frm_filters)
-        type_frame.grid(row=row_index, column=1, sticky="w")
+        type_frame.grid(row=row_index, column=1, sticky="w", padx=(4, 0))
         self.log_type_var = tk.StringVar(value="SQL")
         self.rb_sql = ttk.Radiobutton(type_frame, text=self._("sql"), variable=self.log_type_var, value="SQL", command=self.update_filters)
         self.rb_sql.pack(side="left", padx=(0, 6))
@@ -450,7 +470,7 @@ class LogViewerApp:
         self.lbl_screen = ttk.Label(self.frm_filters, text=self._("screen"))
         self.lbl_screen.grid(row=row_index, column=0, sticky="w", padx=(0, 6), pady=(6, 2))
         screen_frame = ttk.Frame(self.frm_filters)
-        screen_frame.grid(row=row_index, column=1, sticky="ew", pady=(6, 2))
+        screen_frame.grid(row=row_index, column=1, sticky="ew", pady=(6, 2), padx=(4, 0))
         screen_frame.columnconfigure(0, weight=1)
         self.screen_var = tk.StringVar(value="ALL")
         self.combo_screen = ttk.Combobox(screen_frame, textvariable=self.screen_var, values=["ALL"], state="readonly")
@@ -480,10 +500,10 @@ class LogViewerApp:
         self.lbl_keyword = ttk.Label(self.search_row, text=self._("keyword"))
         self.lbl_keyword.grid(row=0, column=0, sticky="w", padx=(0, 6))
         self.search_var = tk.StringVar()
-        self.entry_search = ttk.Entry(self.search_row, textvariable=self.search_var, width=28)
-        self.entry_search.grid(row=0, column=1, sticky="ew")
+        self.entry_search = ttk.Entry(self.search_row, textvariable=self.search_var, width=32)
+        self.entry_search.grid(row=0, column=1, sticky="ew", padx=(0, 8))
         btn_search_frame = ttk.Frame(self.search_row)
-        btn_search_frame.grid(row=0, column=2, sticky="w", padx=(8, 0))
+        btn_search_frame.grid(row=0, column=2, sticky="w")
         self.btn_search = ttk.Button(btn_search_frame, text=self._("search_btn"), command=self.perform_search)
         self.btn_search.pack(side="left")
         self.btn_clear_search = ttk.Button(btn_search_frame, text=self._("clear"), command=self.clear_search)
@@ -496,7 +516,7 @@ class LogViewerApp:
         self.lbl_time_display = ttk.Label(self.time_row, text=self._("time_display"))
         self.lbl_time_display.grid(row=0, column=0, sticky="nw", padx=(0, 6))
         time_options = ttk.Frame(self.time_row)
-        time_options.grid(row=0, column=1, sticky="nw")
+        time_options.grid(row=0, column=1, sticky="nw", padx=(0, 8))
         self.time_format_var = tk.StringVar(value="full")
         self.rb_time_full = ttk.Radiobutton(time_options, text=self._("time_format_full"), variable=self.time_format_var, value="full", command=self.refresh_table)
         self.rb_time_full.grid(row=0, column=0, sticky="w")
@@ -528,6 +548,14 @@ class LogViewerApp:
         self.file_path_var = tk.StringVar(value=self._("no_file"))
         self.summary_var = tk.StringVar(value=self._("msg.no_results"))
         self._refresh_file_label()
+        self._recent_logs: list[dict[str, object]] = []
+
+        self.sql_entries_full: List[SqlEntry] = []
+        self.sql_entries: List[SqlEntry] = []
+        self.error_entries_full: List[ErrorEntry] = []
+        self.error_entries: List[ErrorEntry] = []
+        self._log_truncated_sql = False
+        self._log_truncated_error = False
 
         header = ttk.Frame(content_side)
         header.grid(row=0, column=0, sticky="ew")
@@ -550,20 +578,22 @@ class LogViewerApp:
         self._sql_columns_important: Tuple[str, ...] = ("mark", "screen", "timestamp", "params", "sql")
         self.error_columns: Tuple[str, ...] = ("timestamp", "screen", "summary")
         self._column_meta: dict[str, dict[str, Any]] = {
-            "mark": {"heading": "", "width": 44, "stretch": False, "anchor": "center"},
-            "screen": {"heading": "screen_id", "width": 120, "stretch": False},
+            "mark": {"heading": "", "width": 38, "stretch": False, "anchor": "center"},
+            "screen": {"heading": "screen_id", "width": 108, "stretch": False},
             "timestamp": {"heading": "time", "width": 160, "stretch": False},
-            "command": {"heading": "command", "width": 110, "stretch": False},
-            "function": {"heading": "function", "width": 160, "stretch": False},
-            "params": {"heading": "params", "width": 240, "stretch": False},
-            "sql": {"heading": "sql_filled", "width": 540, "stretch": True},
+            "command": {"heading": "command", "width": 96, "stretch": False},
+            "function": {"heading": "function", "width": 156, "stretch": False},
+            "params": {"heading": "params", "width": 220, "stretch": False},
+            "sql": {"heading": "sql_filled", "width": 520, "stretch": True},
             "summary": {"heading": "summary", "width": 260, "stretch": True},
         }
-        self._mark_symbol = "✓"
+        self._mark_symbol = CHECK_MARK
+        self._empty_mark = EMPTY_MARK
         self._marked_keys: set[str] = set()
         self._item_to_key: dict[str, str] = {}
         self._entry_by_key: dict[str, SqlEntry] = {}
         self._saved_logs: List[dict[str, Any]] = []
+        self._recent_loaded = False
 
         tree_frame = ttk.LabelFrame(content_side, text=self._("results_section"), padding=6, borderwidth=2, relief="ridge")
         tree_frame.grid(row=2, column=0, sticky="nsew")
@@ -605,6 +635,9 @@ class LogViewerApp:
 
         # Mapping rows to entries
         self.row_to_entry: dict[str, object] = {}
+        self._populate_rows: List[Tuple[Tuple[Any, ...], Tuple[str, ...], object, Optional[str]]] = []
+        self._populate_index = 0
+        self._populate_job: Optional[str] = None
 
         # Row styling tags
         self.tree.tag_configure("odd_row", background="#f9f9f9")
@@ -669,6 +702,12 @@ class LogViewerApp:
             heading_text = "" if not heading_key else self._(heading_key)
             self.tree.heading(col, text=heading_text)
             width = meta.get("width", 120)
+            if col == "params" and not self.show_params_var.get():
+                width = 70
+            if col == "timestamp" and self.time_format_var.get() == "time":
+                width = 118
+            if col in {"screen", "command"}:
+                width = min(width, 110 if col == "screen" else 96)
             stretch = meta.get("stretch", False)
             anchor = meta.get("anchor", "w")
             self.tree.column(col, width=width, stretch=stretch, anchor=anchor)
@@ -678,51 +717,315 @@ class LogViewerApp:
         file_path = getattr(self, "current_file", None)
         if not file_path:
             return
-        try:
-            self.sql_entries = parse_sql(file_path)
-            self.error_entries = parse_errors(file_path)
-        except Exception:
-            import traceback
-            logger.exception("Failed to refresh log file %s", file_path)
-            messagebox.showerror(
-                i18n.translate(APP_TITLE_KEY),
-                self._("msg.read_error", error=traceback.format_exc()),
-                parent=self.root,
-            )
-            return
-        self._refresh_file_label()
-        screens = sorted({entry.screen_id for entry in self.sql_entries + self.error_entries if entry.screen_id})
-        self.combo_screen.configure(values=["ALL"] + screens)
-        if self.screen_var.get() not in self.combo_screen["values"]:
-            self.screen_var.set("ALL")
-        self.refresh_table()
+        self._load_log_file(file_path, update_recent=False)
 
     def choose_file(self) -> None:
-        """Chọn file log và tiến hành phân tích."""
+        self._ensure_recent_loaded()
+        popup = tk.Toplevel(self.root)
+        popup.title(self._("choose_log"))
+        popup.transient(self.root)
+        popup.resizable(False, False)
+        try:
+            popup.grab_set()
+        except Exception:
+            pass
+        try:
+            self._apply_icon(popup)
+        except Exception:
+            pass
+        frame = ttk.Frame(popup, padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text=self._("choose_source"), anchor="center").pack(fill="x", pady=(0, 12))
+        ttk.Button(frame, text=self._("choose_new"), command=lambda: self._choose_new_log(popup)).pack(fill="x", pady=(0, 6))
+        ttk.Button(frame, text=self._("choose_recent"), command=lambda: self._show_recent_logs_dialog(popup)).pack(fill="x", pady=(0, 6))
+        ttk.Button(frame, text=self._("close"), command=popup.destroy).pack(fill="x", pady=(4, 0))
+        self._center_child(popup, width=260, height=160)
+
+    def _center_child(self, window: tk.Toplevel, *, width: int, height: int) -> None:
+        try:
+            window.update_idletasks()
+            parent_x = self.root.winfo_rootx()
+            parent_y = self.root.winfo_rooty()
+            parent_w = self.root.winfo_width()
+            parent_h = self.root.winfo_height()
+            x = parent_x + max((parent_w - width) // 2, 0)
+            y = parent_y + max((parent_h - height) // 2, 0)
+            window.geometry(f"{width}x{height}+{x}+{y}")
+        except Exception:
+            pass
+
+    def _choose_new_log(self, dialog: Optional[tk.Toplevel] = None) -> None:
+        if dialog and dialog.winfo_exists():
+            dialog.destroy()
         file_path = filedialog.askopenfilename(
             title=self._("choose_log"),
             filetypes=[("Log files", "*.log"), ("All files", "*.*")],
         )
         if not file_path:
             return
+        if self._load_log_file(file_path):
+            self.current_file = file_path
+
+    def _show_recent_logs_dialog(self, dialog: Optional[tk.Toplevel] = None) -> None:
+        if dialog and dialog.winfo_exists():
+            dialog.destroy()
+        self._ensure_recent_loaded()
+        if not self._recent_logs:
+            messagebox.showinfo(i18n.translate(APP_TITLE_KEY), self._("msg_no_recent_log"), parent=self.root)
+            return
+        win = tk.Toplevel(self.root)
+        win.title(self._("recent_title"))
+        win.geometry("720x360")
+        win.minsize(640, 320)
+        win.transient(self.root)
         try:
-            self.sql_entries = parse_sql(file_path)
-            self.error_entries = parse_errors(file_path)
+            win.grab_set()
+        except Exception:
+            pass
+        try:
+            self._apply_icon(win)
+        except Exception:
+            pass
+        frame = ttk.Frame(win, padding=12)
+        frame.pack(fill="both", expand=True)
+        columns = ("name", "path", "opened_at", "size")
+        tree = ttk.Treeview(frame, columns=columns, show="headings")
+        tree.heading("name", text=self._("filename"))
+        tree.heading("path", text=self._("path"))
+        tree.heading("opened_at", text=self._("opened_at"))
+        tree.heading("size", text=self._("size"))
+        tree.column("name", width=180, stretch=False)
+        tree.column("path", width=360, stretch=True)
+        tree.column("opened_at", width=140, stretch=False)
+        tree.column("size", width=90, stretch=False, anchor="e")
+        tree.pack(fill="both", expand=True)
+        scrollbar_y = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        scrollbar_y.pack(side="right", fill="y")
+        tree.configure(yscrollcommand=scrollbar_y.set)
+        record_map: dict[str, dict[str, object]] = {}
+        for rec in self._recent_logs:
+            path_val = rec.get("path", "")
+            opened = rec.get("opened_at")
+            if isinstance(opened, datetime):
+                opened_display = opened.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                opened_display = str(opened)
+            size_display = self._format_size(rec.get("size"))
+            iid = tree.insert(
+                "",
+                "end",
+                values=(rec.get("name", ""), self._shorten_recent_path(path_val), opened_display, size_display),
+            )
+            record_map[iid] = rec
+
+        def open_selected() -> None:
+            selection = tree.selection()
+            if not selection:
+                return
+            iid_selected = selection[0]
+            rec = record_map.get(iid_selected)
+            if not rec:
+                return
+            win.destroy()
+            path_value = rec.get("path")
+            if not isinstance(path_value, str):
+                return
+            success = self._load_log_file(path_value)
+            if success:
+                self.current_file = path_value
+
+        def _on_double(_event: tk.Event) -> str:
+            open_selected()
+            return "break"
+
+        tree.bind("<Double-1>", _on_double)
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill="x", pady=(8, 0))
+        ttk.Button(btn_frame, text=self._("open_folder"), command=lambda: self._open_recent_location(tree, record_map)).pack(side="left")
+        ttk.Button(btn_frame, text=self._("choose_log"), command=open_selected).pack(side="right", padx=(0, 6))
+        ttk.Button(btn_frame, text=self._("close"), command=win.destroy).pack(side="right")
+        self._center_child(win, width=720, height=360)
+
+    def _add_recent_log(self, file_path: str) -> None:
+        self._ensure_recent_loaded()
+        if not file_path:
+            return
+        info = Path(file_path)
+        try:
+            size = info.stat().st_size if info.exists() else None
+        except Exception:
+            size = None
+        record = {
+            "path": file_path,
+            "name": info.name or file_path,
+            "opened_at": datetime.now(),
+            "size": size,
+        }
+        self._recent_logs = [r for r in self._recent_logs if r.get("path") != file_path]
+        self._recent_logs.insert(0, record)
+        if len(self._recent_logs) > 20:
+            self._recent_logs = self._recent_logs[:20]
+        try:
+            import json
+
+            recent_path = ROOT_DIR / ".cache" / "recent_logs.json"
+            recent_path.parent.mkdir(parents=True, exist_ok=True)
+            serializable: List[dict[str, object]] = []
+            for r in self._recent_logs:
+                opened = r.get("opened_at")
+                if isinstance(opened, datetime):
+                    opened_str = opened.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    opened_str = str(opened or "")
+                serializable.append({
+                    "path": r.get("path"),
+                    "name": r.get("name"),
+                    "opened_at": opened_str,
+                    "size": r.get("size"),
+                })
+            with (recent_path.open("w", encoding="utf-8")) as fh:
+                json.dump(serializable, fh, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _load_log_file(self, file_path: str, *, update_recent: bool = True) -> bool:
+        if not file_path:
+            return False
+        try:
+            sql_full = parse_sql(file_path)
+            error_full = parse_errors(file_path)
         except Exception:
             import traceback
-            logger.exception("Failed to parse selected log file %s", file_path)
+
+            logger.exception("Failed to load log file %s", file_path)
             messagebox.showerror(
                 i18n.translate(APP_TITLE_KEY),
                 self._("msg.read_error", error=traceback.format_exc()),
                 parent=self.root,
             )
-            return
-        screens = sorted({entry.screen_id for entry in self.sql_entries + self.error_entries if entry.screen_id})
+            return False
+        self.sql_entries_full = sql_full
+        self.error_entries_full = error_full
+        self._apply_entry_limits()
+        if update_recent:
+            self._add_recent_log(file_path)
+        screens = sorted({entry.screen_id for entry in self.sql_entries_full + self.error_entries_full if entry.screen_id})
         self.combo_screen.configure(values=["ALL"] + screens)
-        self.screen_var.set("ALL")
+        if self.screen_var.get() not in self.combo_screen["values"]:
+            self.screen_var.set("ALL")
         self.current_file = file_path
         self._refresh_file_label()
         self.refresh_table()
+        return True
+
+    def _format_size(self, size_bytes: Optional[object]) -> str:
+        try:
+            size = int(size_bytes) if size_bytes is not None else None
+        except Exception:
+            size = None
+        if size is None or size < 0:
+            return ""
+        units = ["B", "KB", "MB", "GB", "TB"]
+        value = float(size)
+        unit = 0
+        while value >= 1024 and unit < len(units) - 1:
+            value /= 1024
+            unit += 1
+        if unit == 0:
+            return f"{int(value)} {units[unit]}"
+        return f"{value:.1f} {units[unit]}"
+
+    def _shorten_recent_path(self, path: str) -> str:
+        if not path:
+            return ""
+        marker = "master-unfiticated"
+        idx = path.find(marker)
+        if idx != -1:
+            return path[idx:]
+        if len(path) <= 80:
+            return path
+        return "..." + path[-77:]
+
+    def _open_recent_location(self, tree: ttk.Treeview, record_map: dict[str, dict[str, object]]) -> None:
+        selection = tree.selection()
+        if not selection:
+            return
+        rec = record_map.get(selection[0])
+        if not rec:
+            return
+        path_val = rec.get("path")
+        if not isinstance(path_val, str) or not path_val:
+            return
+        folder = os.path.dirname(path_val)
+        if not folder or not os.path.isdir(folder):
+            messagebox.showerror(i18n.translate(APP_TITLE_KEY), self._("open_folder_error", error=self._("no_file")), parent=self.root)
+            return
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(folder)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", folder])
+            else:
+                subprocess.Popen(["xdg-open", folder])
+        except Exception as exc:
+            logger.exception("Failed to open folder %s", folder)
+            messagebox.showerror(i18n.translate(APP_TITLE_KEY), self._("open_folder_error", error=str(exc)), parent=self.root)
+
+    def _ensure_recent_loaded(self) -> None:
+        if getattr(self, "_recent_loaded", False):
+            return
+        recent_path = ROOT_DIR / ".cache" / "recent_logs.json"
+        try:
+            import json
+            data = json.loads(recent_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            self._recent_logs = []
+            self._recent_loaded = True
+            return
+        except Exception:
+            self._recent_logs = []
+            self._recent_loaded = True
+            return
+        parsed: List[dict[str, object]] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            path_val = item.get("path")
+            if not path_val:
+                continue
+            opened_raw = item.get("opened_at")
+            try:
+                opened_dt = datetime.strptime(opened_raw, "%Y-%m-%d %H:%M:%S") if opened_raw else datetime.now()
+            except Exception:
+                opened_dt = datetime.now()
+            size_val = item.get("size")
+            if size_val is not None:
+                try:
+                    size_val = int(size_val)
+                except Exception:
+                    size_val = None
+            parsed.append({
+                "path": path_val,
+                "name": item.get("name") or Path(path_val).name or path_val,
+                "opened_at": opened_dt,
+                "size": size_val,
+            })
+        self._recent_logs = parsed
+        self._recent_loaded = True
+
+    def _apply_entry_limits(self) -> None:
+        if len(self.sql_entries_full) > MAX_DISPLAY_ROWS:
+            self.sql_entries = self.sql_entries_full[:MAX_DISPLAY_ROWS]
+            self._log_truncated_sql = True
+        else:
+            self.sql_entries = list(self.sql_entries_full)
+            self._log_truncated_sql = False
+        if len(self.error_entries_full) > MAX_DISPLAY_ROWS:
+            self.error_entries = self.error_entries_full[:MAX_DISPLAY_ROWS]
+            self._log_truncated_error = True
+        else:
+            self.error_entries = list(self.error_entries_full)
+            self._log_truncated_error = False
 
     def update_filters(self) -> None:
         """Điều chỉnh bố cục và tiêu đề khi đổi loại log (SQL/ERROR)."""
@@ -753,6 +1056,8 @@ class LogViewerApp:
         """Làm mới bảng kết quả theo bộ lọc hiện tại."""
         if not hasattr(self, "tree"):
             return
+        self._configure_tree_columns()
+        self._cancel_pending_population()
         for row in self.tree.get_children():
             self.tree.delete(row)
         selected_screen = self.screen_var.get()
@@ -761,7 +1066,7 @@ class LogViewerApp:
         columns = self._get_active_columns()
         self.row_to_entry.clear()
         self._item_to_key = {}
-        row_index = 0
+        rows_to_render: List[Tuple[Tuple[Any, ...], Tuple[str, ...], object, Optional[str]]] = []
 
         if is_sql:
             command_filter = self.sql_command_var.get()
@@ -794,7 +1099,7 @@ class LogViewerApp:
                     continue
                 key = self._build_entry_key(entry)
                 self._entry_by_key[key] = entry
-                mark_value = self._mark_symbol if key in self._marked_keys else ""
+                mark_value = self._mark_symbol if key in self._marked_keys else self._empty_mark
                 row_map = {
                     "mark": mark_value,
                     "screen": entry.screen_id or "",
@@ -805,18 +1110,16 @@ class LogViewerApp:
                     "sql": entry.sql,
                 }
                 row_values = tuple(row_map.get(col, "") for col in columns)
-                row_tag = "even_row" if row_index % 2 == 0 else "odd_row"
-                tags = [row_tag]
+                row_tag = "even_row" if len(rows_to_render) % 2 == 0 else "odd_row"
+                tags: List[str] = [row_tag]
                 if tag_match:
                     tags.append("match")
-                item_id = self.tree.insert("", "end", values=row_values, tags=tuple(tags))
-                self.row_to_entry[item_id] = entry
-                self._item_to_key[item_id] = key
-                row_index += 1
+                rows_to_render.append((row_values, tuple(tags), entry, key))
             self._marked_keys.intersection_update(set(self._entry_by_key.keys()))
         else:
             self._total_count = len(self.error_entries)
             self._marked_keys.clear()
+            self._entry_by_key = {}
             for entry in self.error_entries:
                 if selected_screen != "ALL" and entry.screen_id != selected_screen:
                     continue
@@ -840,18 +1143,55 @@ class LogViewerApp:
                 if not include_row:
                     continue
                 display_values = (row_values_all[0], row_values_all[1], row_values_all[2])
-                row_tag = "even_row" if row_index % 2 == 0 else "odd_row"
+                row_tag = "even_row" if len(rows_to_render) % 2 == 0 else "odd_row"
                 tags = [row_tag]
                 if tag_match:
                     tags.append("match")
-                item_id = self.tree.insert("", "end", values=display_values, tags=tuple(tags))
-                self.row_to_entry[item_id] = entry
-                row_index += 1
+                rows_to_render.append((display_values, tuple(tags), entry, None))
 
-        self._visible_count = row_index
-        self._update_empty_state(row_index > 0)
+        self._visible_count = len(rows_to_render)
+        self._update_empty_state(bool(rows_to_render))
         self._update_summary_label()
+        self._populate_tree_async(rows_to_render)
         self._update_action_buttons()
+
+    def _cancel_pending_population(self) -> None:
+        """Hủy job insert treeview còn dang dở khi refresh."""
+        if self._populate_job:
+            try:
+                self.root.after_cancel(self._populate_job)
+            except Exception:
+                pass
+            self._populate_job = None
+        self._populate_rows = []
+        self._populate_index = 0
+
+    def _populate_tree_async(self, rows: Sequence[Tuple[Tuple[Any, ...], Tuple[str, ...], object, Optional[str]]]) -> None:
+        """Chèn dữ liệu vào tree từng đợt nhỏ để UI không bị đứng."""
+        self._populate_rows = list(rows)
+        self._populate_index = 0
+        if not self._populate_rows:
+            return
+        batch = 400 if len(self._populate_rows) > 1200 else 250
+
+        def insert_chunk() -> None:
+            if not self.root.winfo_exists():
+                return
+            start = self._populate_index
+            end = min(start + batch, len(self._populate_rows))
+            for row_values, tags, entry, key in self._populate_rows[start:end]:
+                item_id = self.tree.insert("", "end", values=row_values, tags=tags)
+                self.row_to_entry[item_id] = entry
+                if key is not None:
+                    self._item_to_key[item_id] = key
+            self._populate_index = end
+            if end < len(self._populate_rows):
+                self._populate_job = self.root.after(10, insert_chunk)
+            else:
+                self._populate_job = None
+                self._populate_rows = []
+
+        insert_chunk()
 
     def clear_search(self) -> None:
         """Xóa từ khóa tìm kiếm và làm mới kết quả."""
@@ -927,7 +1267,7 @@ class LogViewerApp:
 
     def _update_summary_label(self) -> None:
         if not getattr(self, "current_file", None):
-            self.summary_var.set(self._("no_file"))
+            self.summary_var.set(self._("msg_choose_prompt"))
             return
         total = self._total_count
         visible = self._visible_count
@@ -1038,7 +1378,7 @@ class LogViewerApp:
             self._marked_keys.add(key)
             symbol = self._mark_symbol
         if "mark" in self.tree["columns"]:
-            self.tree.set(item_id, "mark", symbol)
+            self.tree.set(item_id, "mark", symbol if symbol else self._empty_mark)
         self._update_action_buttons()
 
     def save_selected_logs(self) -> None:
@@ -1081,207 +1421,268 @@ class LogViewerApp:
         tree.heading("params", text=self._("params"))
         tree.heading("sql", text=self._("sql_filled"))
         tree.column("saved_at", width=160, stretch=False)
-        tree.column("screen", width=110, stretch=False)
-        tree.column("timestamp", width=140, stretch=False)
-        tree.column("command", width=90, stretch=False)
+        tree.column("screen", width=108, stretch=False)
+        tree.column("timestamp", width=148, stretch=False)
+        tree.column("command", width=96, stretch=False)
         tree.column("function", width=150, stretch=False)
         tree.column("params", width=220, stretch=False)
-        tree.column("sql", width=380, stretch=True)
+        tree.column("sql", width=420, stretch=True)
         tree.pack(fill="both", expand=True)
         scry = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
         scry.pack(side="right", fill="y")
-        tree.configure(yscrollcommand=scry.set)
+        scrx = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)
+        scrx.pack(side="bottom", fill="x")
+        tree.configure(yscrollcommand=scry.set, xscrollcommand=scrx.set)
+        saved_row_map: dict[str, SqlEntry] = {}
         for record in self._saved_logs:
             entry = record["entry"]
             saved_at = record["saved_at"].strftime("%Y-%m-%d %H:%M:%S")
             params_text = ", ".join(entry.params)
-            tree.insert(
+            iid = tree.insert(
                 "",
                 "end",
                 values=(saved_at, entry.screen_id or "", entry.timestamp, entry.sql_type, entry.function, params_text, entry.sql),
             )
+            saved_row_map[iid] = entry
+
+        def on_saved_double_click(event: tk.Event) -> None:
+            if tree.identify("region", event.x, event.y) != "cell":
+                return
+            item = tree.identify_row(event.y)
+            if not item:
+                return
+            tree.selection_set(item)
+            entry_selected = saved_row_map.get(item)
+            if not entry_selected:
+                return
+            column_id = tree.identify_column(event.x)
+            try:
+                col_idx = int(column_id[1:]) - 1
+            except (ValueError, TypeError):
+                col_idx = -1
+            if col_idx < 0:
+                return
+            cols = tree["columns"]
+            if col_idx >= len(cols):
+                return
+            col_name = cols[col_idx]
+            if col_name == "params":
+                self._show_params_popup(entry_selected)
+            else:
+                self._show_sql_popup(entry_selected)
+
+        tree.bind("<Double-1>", on_saved_double_click, add="+")
         ttk.Button(frame, text=self._("close"), command=win.destroy).pack(pady=(8, 0))
+
 
     def on_double_click(self, event: tk.Event) -> None:
         """Xử lý thao tác double-click để xem chi tiết."""
-        selection = self.tree.selection()
-        if not selection:
+        if self.tree.identify("region", event.x, event.y) != "cell":
             return
-        item_id = selection[0]
-        column = self.tree.identify_column(event.x)
+        item_id = self.tree.identify_row(event.y)
+        if not item_id:
+            return
+        self.tree.selection_set(item_id)
         entry = self.row_to_entry.get(item_id)
         if entry is None:
             return
-        _ = self._
+        column_id = self.tree.identify_column(event.x)
+        column_name: Optional[str] = None
+        columns = self.tree["columns"]
+        try:
+            col_index = int(column_id[1:]) - 1
+        except (ValueError, TypeError):
+            col_index = -1
+        if 0 <= col_index < len(columns):
+            column_name = columns[col_index]
 
-        if self.log_type_var.get() == "SQL":
-            if column == "#5":
-                # Existing parameter popup
-                params = entry.params
-                raw_sql = entry.raw_sql
-                mapping = self.map_params_to_fields(raw_sql, params)
-                popup = tk.Toplevel(self.root)
-                popup.title(_("params"))
-                popup.geometry("500x300")
-                try:
-                    self._apply_icon(popup)
-                except Exception:
-                    pass
-                table_frame = tk.Frame(popup)
-                table_frame.pack(fill="both", expand=True, padx=5, pady=5)
-                scry = tk.Scrollbar(table_frame, orient="vertical")
-                scry.pack(side="right", fill="y")
-                scrx = tk.Scrollbar(table_frame, orient="horizontal")
-                scrx.pack(side="bottom", fill="x")
-                param_border = tk.Frame(table_frame, bd=1, relief="solid")
-                param_border.pack(fill="both", expand=True)
-                param_tree = ttk.Treeview(
-                    param_border,
-                    columns=("field", "value"),
-                    show="headings",
-                    yscrollcommand=scry.set,
-                    xscrollcommand=scrx.set,
-                )
-                param_tree.heading("field", text=_("field"))
-                param_tree.heading("value", text=_("value"))
-                for field, val in mapping:
-                    param_tree.insert("", "end", values=(field or "", val))
-                field_len = max(len(str(f or "")) for f, _ in mapping) if mapping else 0
-                value_len = max(len(str(v)) for _, v in mapping) if mapping else 0
-                char_w = 7
-                param_tree.column("field", width=max(80, field_len * char_w), stretch=False)
-                param_tree.column("value", width=max(80, value_len * char_w), stretch=True)
-                param_tree.pack(fill="both", expand=True)
-                scry.config(command=param_tree.yview)
-                scrx.config(command=param_tree.xview)
-                btn_frame = tk.Frame(popup)
-                btn_frame.pack(fill="x", pady=5)
-                def copy_params() -> None:
-                    lines = []
-                    for field, val in mapping:
-                        lines.append(f"{field}: {val}" if field else str(val))
-                    self.root.clipboard_clear()
-                    self.root.clipboard_append("\n".join(lines))
-                    messagebox.showinfo(_("copied"), _("details_copied"))
-                tk.Button(btn_frame, text=_("copy"), command=copy_params).pack(side="right", padx=5)
-                tk.Button(btn_frame, text=_("close"), command=popup.destroy).pack(side="right", padx=5)
-            else:
-                # SQL popup with toggle button to switch to field/value view
-                sql = entry.sql
-                if not sql:
-                    return
-                formatted_sql = format_sql(sql)
-                raw_sql = entry.raw_sql
-                params = entry.params
-                mapping = self.map_params_to_fields(raw_sql, params)
-
-                popup = tk.Toplevel(self.root)
-                popup.title(_("sql_detail_title"))
-                popup.geometry("800x450")
-                try:
-                    self._apply_icon(popup)
-                except Exception:
-                    pass
-
-                # Two frames: sql_frame and param_frame
-                container = tk.Frame(popup)
-                container.pack(fill="both", expand=True, padx=5, pady=5)
-
-                # SQL view
-                sql_frame = tk.Frame(container)
-                scroll_y_sql = tk.Scrollbar(sql_frame, orient="vertical")
-                scroll_y_sql.pack(side="right", fill="y")
-                text_sql = tk.Text(sql_frame, wrap="none", yscrollcommand=scroll_y_sql.set)
-                text_sql.insert("1.0", formatted_sql)
-                text_sql.configure(state="disabled")
-                text_sql.pack(fill="both", expand=True)
-                scroll_y_sql.config(command=text_sql.yview)
-
-                # Param view
-                param_frame = tk.Frame(container)
-                scry = tk.Scrollbar(param_frame, orient="vertical")
-                scry.pack(side="right", fill="y")
-                scrx = tk.Scrollbar(param_frame, orient="horizontal")
-                scrx.pack(side="bottom", fill="x")
-                param_border = tk.Frame(param_frame, bd=1, relief="solid")
-                param_border.pack(fill="both", expand=True)
-                param_tree = ttk.Treeview(
-                    param_border,
-                    columns=("field", "value"),
-                    show="headings",
-                    yscrollcommand=scry.set,
-                    xscrollcommand=scrx.set,
-                )
-                param_tree.heading("field", text=_("field"))
-                param_tree.heading("value", text=_("value"))
-                for field, val in mapping:
-                    param_tree.insert("", "end", values=(field or "", val))
-                char_w = 7
-                field_len = max(len(str(f or "")) for f, _ in mapping) if mapping else 0
-                value_len = max(len(str(v)) for _, v in mapping) if mapping else 0
-                param_tree.column("field", width=max(80, field_len * char_w), stretch=False)
-                param_tree.column("value", width=max(80, value_len * char_w), stretch=True)
-                param_tree.pack(fill="both", expand=True)
-                scry.config(command=param_tree.yview)
-                scrx.config(command=param_tree.xview)
-
-                # Start with SQL view
-                sql_frame.pack(fill="both", expand=True)
-
-                btn_frame = tk.Frame(popup)
-                btn_frame.pack(fill="x", pady=5)
-
-                # Toggle action
-                showing_sql = {"value": True}
-                def toggle_view() -> None:
-                    if showing_sql["value"]:
-                        sql_frame.pack_forget()
-                        param_frame.pack(fill="both", expand=True)
-                    else:
-                        param_frame.pack_forget()
-                        sql_frame.pack(fill="both", expand=True)
-                    showing_sql["value"] = not showing_sql["value"]
-
-                def copy_current() -> None:
-                    self.root.clipboard_clear()
-                    if showing_sql["value"]:
-                        self.root.clipboard_append(formatted_sql)
-                        messagebox.showinfo(_("copied"), _("sql_copied"))
-                    else:
-                        lines = []
-                        for field, val in mapping:
-                            lines.append(f"{field}: {val}" if field else str(val))
-                        self.root.clipboard_append("\n".join(lines))
-                        messagebox.showinfo(_("copied"), _("details_copied"))
-
-                tk.Button(btn_frame, text=self._("toggle_param_sql"), command=toggle_view).pack(side="left", padx=5)
-                tk.Button(btn_frame, text=_("copy"), command=copy_current).pack(side="right", padx=5)
-                tk.Button(btn_frame, text=_("close"), command=popup.destroy).pack(side="right", padx=5)
-        else:
-            details = entry.details
-            if not details:
+        if isinstance(entry, SqlEntry):
+            if column_name == "mark":
                 return
-            popup = tk.Toplevel(self.root)
-            popup.title(_("error_detail_title"))
-            popup.geometry("800x400")
+            if column_name == "params":
+                self._show_params_popup(entry)
+            else:
+                self._show_sql_popup(entry)
+        elif isinstance(entry, ErrorEntry):
+            self._show_error_popup(entry)
+
+    def _show_params_popup(self, entry: SqlEntry) -> None:
+        """Hiển thị popup tham số với dạng bảng."""
+        mapping = self.map_params_to_fields(entry.raw_sql, entry.params)
+        _ = self._
+        popup = tk.Toplevel(self.root)
+        popup.title(_("params"))
+        popup.geometry("520x320")
+        try:
             self._apply_icon(popup)
-            text_frame = tk.Frame(popup)
-            text_frame.pack(fill="both", expand=True, padx=5, pady=5)
-            scroll_y = tk.Scrollbar(text_frame, orient="vertical")
-            scroll_y.pack(side="right", fill="y")
-            text = tk.Text(text_frame, wrap="none", yscrollcommand=scroll_y.set)
-            text.insert("1.0", details)
-            text.configure(state="disabled")
-            text.pack(fill="both", expand=True)
-            scroll_y.config(command=text.yview)
-            btn_frame = tk.Frame(popup)
-            btn_frame.pack(fill="x", pady=5)
-            def copy_details() -> None:
-                self.root.clipboard_clear()
-                self.root.clipboard_append(details)
+        except Exception:
+            pass
+        table_frame = tk.Frame(popup)
+        table_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        scry = tk.Scrollbar(table_frame, orient="vertical")
+        scry.pack(side="right", fill="y")
+        scrx = tk.Scrollbar(table_frame, orient="horizontal")
+        scrx.pack(side="bottom", fill="x")
+        param_border = tk.Frame(table_frame, bd=1, relief="solid")
+        param_border.pack(fill="both", expand=True)
+        param_tree = ttk.Treeview(
+            param_border,
+            columns=("field", "value"),
+            show="headings",
+            yscrollcommand=scry.set,
+            xscrollcommand=scrx.set,
+        )
+        param_tree.heading("field", text=_("field"))
+        param_tree.heading("value", text=_("value"))
+        if mapping:
+            for field, val in mapping:
+                param_tree.insert("", "end", values=(field or "", val))
+        else:
+            for val in entry.params:
+                param_tree.insert("", "end", values=("", val))
+        char_w = 7
+        field_len = max(len(str(f or "")) for f, _ in mapping) if mapping else 0
+        value_len = max(len(str(v)) for _, v in mapping) if mapping else 0
+        param_tree.column("field", width=max(80, field_len * char_w), stretch=False)
+        param_tree.column("value", width=max(80, value_len * char_w), stretch=True)
+        param_tree.pack(fill="both", expand=True)
+        scry.config(command=param_tree.yview)
+        scrx.config(command=param_tree.xview)
+        btn_frame = tk.Frame(popup)
+        btn_frame.pack(fill="x", pady=5)
+
+        def copy_params() -> None:
+            lines = []
+            source = mapping if mapping else [(None, val) for val in entry.params]
+            for field, val in source:
+                lines.append(f"{field}: {val}" if field else str(val))
+            self.root.clipboard_clear()
+            self.root.clipboard_append("\n".join(lines))
+            messagebox.showinfo(_("copied"), _("details_copied"))
+
+        tk.Button(btn_frame, text=_("copy"), command=copy_params).pack(side="right", padx=5)
+        tk.Button(btn_frame, text=_("close"), command=popup.destroy).pack(side="right", padx=5)
+
+    def _show_sql_popup(self, entry: SqlEntry) -> None:
+        """Hiển thị popup SQL với khả năng chuyển đổi qua tham số."""
+        sql = entry.sql
+        if not sql:
+            return
+        formatted_sql = format_sql(sql)
+        mapping = self.map_params_to_fields(entry.raw_sql, entry.params)
+        _ = self._
+        popup = tk.Toplevel(self.root)
+        popup.title(_("sql_detail_title"))
+        popup.geometry("820x460")
+        try:
+            self._apply_icon(popup)
+        except Exception:
+            pass
+
+        container = tk.Frame(popup)
+        container.pack(fill="both", expand=True, padx=5, pady=5)
+
+        sql_frame = tk.Frame(container)
+        scroll_y_sql = tk.Scrollbar(sql_frame, orient="vertical")
+        scroll_y_sql.pack(side="right", fill="y")
+        text_sql = tk.Text(sql_frame, wrap="none", yscrollcommand=scroll_y_sql.set)
+        text_sql.insert("1.0", formatted_sql)
+        text_sql.configure(state="disabled")
+        text_sql.pack(fill="both", expand=True)
+        scroll_y_sql.config(command=text_sql.yview)
+
+        param_frame = tk.Frame(container)
+        scry = tk.Scrollbar(param_frame, orient="vertical")
+        scry.pack(side="right", fill="y")
+        scrx = tk.Scrollbar(param_frame, orient="horizontal")
+        scrx.pack(side="bottom", fill="x")
+        param_border = tk.Frame(param_frame, bd=1, relief="solid")
+        param_border.pack(fill="both", expand=True)
+        param_tree = ttk.Treeview(
+            param_border,
+            columns=("field", "value"),
+            show="headings",
+            yscrollcommand=scry.set,
+            xscrollcommand=scrx.set,
+        )
+        param_tree.heading("field", text=_("field"))
+        param_tree.heading("value", text=_("value"))
+        if mapping:
+            for field, val in mapping:
+                param_tree.insert("", "end", values=(field or "", val))
+        else:
+            for val in entry.params:
+                param_tree.insert("", "end", values=("", val))
+        char_w = 7
+        field_len = max(len(str(f or "")) for f, _ in mapping) if mapping else 0
+        value_len = max(len(str(v)) for _, v in mapping) if mapping else 0
+        param_tree.column("field", width=max(80, field_len * char_w), stretch=False)
+        param_tree.column("value", width=max(80, value_len * char_w), stretch=True)
+        param_tree.pack(fill="both", expand=True)
+        scry.config(command=param_tree.yview)
+        scrx.config(command=param_tree.xview)
+
+        sql_frame.pack(fill="both", expand=True)
+
+        btn_frame = tk.Frame(popup)
+        btn_frame.pack(fill="x", pady=5)
+        showing_sql = {"value": True}
+
+        def toggle_view() -> None:
+            if showing_sql["value"]:
+                sql_frame.pack_forget()
+                param_frame.pack(fill="both", expand=True)
+            else:
+                param_frame.pack_forget()
+                sql_frame.pack(fill="both", expand=True)
+            showing_sql["value"] = not showing_sql["value"]
+
+        def copy_current() -> None:
+            self.root.clipboard_clear()
+            if showing_sql["value"]:
+                self.root.clipboard_append(formatted_sql)
+                messagebox.showinfo(_("copied"), _("sql_copied"))
+            else:
+                lines = []
+                source = mapping if mapping else [(None, val) for val in entry.params]
+                for field, val in source:
+                    lines.append(f"{field}: {val}" if field else str(val))
+                self.root.clipboard_append("\n".join(lines))
                 messagebox.showinfo(_("copied"), _("details_copied"))
-            tk.Button(btn_frame, text=_("copy"), command=copy_details).pack(side="right", padx=5)
-            tk.Button(btn_frame, text=_("close"), command=popup.destroy).pack(side="right", padx=5)
+
+        tk.Button(btn_frame, text=self._("toggle_param_sql"), command=toggle_view).pack(side="left", padx=5)
+        tk.Button(btn_frame, text=_("copy"), command=copy_current).pack(side="right", padx=5)
+        tk.Button(btn_frame, text=_("close"), command=popup.destroy).pack(side="right", padx=5)
+
+    def _show_error_popup(self, entry: ErrorEntry) -> None:
+        """Hiển thị popup chi tiết lỗi."""
+        details = entry.details
+        if not details:
+            return
+        _ = self._
+        popup = tk.Toplevel(self.root)
+        popup.title(_("error_detail_title"))
+        popup.geometry("800x400")
+        self._apply_icon(popup)
+        text_frame = tk.Frame(popup)
+        text_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        scroll_y = tk.Scrollbar(text_frame, orient="vertical")
+        scroll_y.pack(side="right", fill="y")
+        text = tk.Text(text_frame, wrap="none", yscrollcommand=scroll_y.set)
+        text.insert("1.0", details)
+        text.configure(state="disabled")
+        text.pack(fill="both", expand=True)
+        scroll_y.config(command=text.yview)
+        btn_frame = tk.Frame(popup)
+        btn_frame.pack(fill="x", pady=5)
+
+        def copy_details() -> None:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(details)
+            messagebox.showinfo(_("copied"), _("details_copied"))
+
+        tk.Button(btn_frame, text=_("copy"), command=copy_details).pack(side="right", padx=5)
+        tk.Button(btn_frame, text=_("close"), command=popup.destroy).pack(side="right", padx=5)
 
     def map_params_to_fields(self, raw_sql: str, params: List[str]) -> List[Tuple[Optional[str], str]]:
         """Ghép giá trị tham số về cột/điều kiện tương ứng trong SQL gốc."""
@@ -1343,6 +1744,12 @@ class LogViewerApp:
     def _on_close(self) -> None:
         """Đóng cửa sổ log viewer và thu dọn tài nguyên."""
         self._cleanup_language_listener()
+        self._cancel_pending_population()
+        try:
+            self.root.unbind_all("<Control-c>")
+            self.root.unbind_all("<Control-f>")
+        except Exception:
+            pass
         if self.root.winfo_exists():
             self.root.destroy()
 
@@ -1352,14 +1759,33 @@ class LogViewerApp:
 
     def copy_all_or_selected(self, event=None) -> None:
         """Copy các dòng được chọn (hoặc toàn bộ nếu không chọn) vào clipboard định dạng TSV."""
-        columns = self.tree["columns"]
-        items = self.tree.selection()
+        tree = getattr(self, "tree", None)
+        if tree is None:
+            return "break" if event else None
+        try:
+            if not tree.winfo_exists():
+                return "break" if event else None
+        except tk.TclError:
+            return "break" if event else None
+        try:
+            columns = tree["columns"]
+        except tk.TclError:
+            return "break" if event else None
+        items = tree.selection()
         if not items:
-            items = self.tree.get_children()
-        header = [self.tree.heading(c)["text"] for c in columns]
+            items = tree.get_children()
+        header: List[str] = []
+        for c in columns:
+            try:
+                header.append(tree.heading(c)["text"])
+            except tk.TclError:
+                header.append("")
         lines = ["\t".join(header)]
         for it in items:
-            vals = self.tree.item(it, "values")
+            try:
+                vals = tree.item(it, "values")
+            except tk.TclError:
+                continue
             safe_vals = [str(v) if v is not None else "" for v in vals]
             lines.append("\t".join(safe_vals))
         data = "\n".join(lines)
@@ -1368,6 +1794,7 @@ class LogViewerApp:
             self.root.clipboard_append(data)
         except Exception:
             pass  # Clipboard may fail in some environments
+        return "break" if event else None
 
 def open_log_viewer(parent: Optional[tk.Misc] = None, icon_path: Optional[str] = None):
     resolved_icon = icon_path

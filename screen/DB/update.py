@@ -23,11 +23,16 @@ ACTIVE_WINDOWS: List["UpdateWindow"] = []
 logger = logging.getLogger("ToolVIP.Update")
 
 
+def get_logger() -> logging.Logger:
+    return logging.getLogger("ToolVIP.Update")
+
+
 class UpdateWindow(tk.Toplevel):
     def __init__(self, parent: tk.Widget, connection: Dict[str, str]):
         """Khởi tạo cửa sổ Update với dữ liệu kết nối đã chọn."""
         super().__init__(parent)
         self.parent = parent
+        self._logger = get_logger()
         self.conn_info = connection
         self.conn = None
         self.current_owner = connection.get("user", "").upper()
@@ -50,7 +55,6 @@ class UpdateWindow(tk.Toplevel):
         self._current_table_label: str = "..."
         self._metadata_cache: Dict[str, Dict[str, Any]] = {}
         self._metadata_token: int = 0
-        self._logger = logger
 
         ACTIVE_WINDOWS.append(self)
 

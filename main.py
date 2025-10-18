@@ -181,7 +181,9 @@ class ToolVIP(tk.Tk):
 
         # state
         self.show_pwd = tk.BooleanVar(value=False)
-        self.var_use_host_port = tk.BooleanVar(value=bool(self.config.get("use_host_port", False)))
+        # Checkbox should start unchecked regardless of previous sessions.
+        self.var_use_host_port = tk.BooleanVar(value=False)
+        self.config["use_host_port"] = False
         self._last_error = ""
         self._status_custom = False
         self.conn_blocks = {}
@@ -633,8 +635,22 @@ class ToolVIP(tk.Tk):
         for path in files:
             listbox.insert(tk.END, os.path.basename(path))
 
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill="x", pady=(8, 0))
+        btn_delete = ttk.Button(btn_frame, text=self._t("main.btn.delete_log"))
+        btn_delete.pack(side="left")
+        ttk.Button(btn_frame, text=self._t("common.close"), command=win.destroy).pack(side="right")
+
+        def update_state(_event=None):
+            if listbox.curselection():
+                btn_delete.state(["!disabled"])
+            else:
+                btn_delete.state(["disabled"])
+
+        btn_delete.configure(command=lambda: self._delete_log_file(win, files, listbox, update_state))
         listbox.bind("<Double-Button-1>", lambda _e: self._open_log_file(win, files, listbox))
-        ttk.Button(frame, text=self._t("common.close"), command=win.destroy).pack(anchor="e", pady=(8, 0))
+        listbox.bind("<<ListboxSelect>>", update_state)
+        update_state()
         listbox.focus_set()
 
     def _open_log_file(self, parent: tk.Toplevel, files: list[str], listbox: tk.Listbox) -> None:
@@ -675,6 +691,34 @@ class ToolVIP(tk.Tk):
             messagebox.showinfo(APP_TITLE, i18n.translate("main.log.copied"), parent=self)
         except Exception as exc:
             self._logger.exception("Copy log failed")
+
+    def _delete_log_file(self, dialog: tk.Toplevel, files: list[str], listbox: tk.Listbox, update_state) -> None:
+        selection = listbox.curselection()
+        if not selection:
+            messagebox.showinfo(APP_TITLE, i18n.translate("main.log.delete_none"), parent=dialog)
+            return
+        index = selection[0]
+        path = files[index]
+        name = os.path.basename(path)
+        if not messagebox.askyesno(APP_TITLE, i18n.translate("main.log.delete_confirm", name=name), parent=dialog):
+            return
+        try:
+            os.remove(path)
+        except Exception as exc:
+            self._logger.exception("Failed to delete log file %s", path)
+            messagebox.showerror(APP_TITLE, i18n.translate("main.log.delete_error", error=str(exc)), parent=dialog)
+            return
+        files.pop(index)
+        listbox.delete(index)
+        messagebox.showinfo(APP_TITLE, i18n.translate("main.log.delete_done"), parent=dialog)
+        if not files:
+            dialog.destroy()
+            return
+        if listbox.size() > 0:
+            new_index = min(index, listbox.size() - 1)
+            listbox.selection_set(new_index)
+            listbox.see(new_index)
+        update_state()
     def _edit_connection(self):
         initial = {
             "user": self.ent_user.get().strip(),

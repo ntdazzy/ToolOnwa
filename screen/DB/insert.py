@@ -22,11 +22,16 @@ ACTIVE_WINDOWS: List["InsertWindow"] = []
 logger = logging.getLogger("ToolVIP.Insert")
 
 
+def get_logger() -> logging.Logger:
+    return logging.getLogger("ToolVIP.Insert")
+
+
 class InsertWindow(tk.Toplevel):
     def __init__(self, parent: tk.Widget, connection: Dict[str, str]):
         """Khởi tạo cửa sổ Insert với thông tin kết nối đã chọn."""
         super().__init__(parent)
         self.parent = parent
+        self._logger = get_logger()
         self.conn_info = connection
         self.conn = None
         self.current_owner = connection.get("user", "").upper()
@@ -49,7 +54,6 @@ class InsertWindow(tk.Toplevel):
         self._current_table_label: str = "..."
         self._metadata_cache: Dict[str, Dict[str, Any]] = {}
         self._metadata_token: int = 0
-        self._logger = logger
 
         ACTIVE_WINDOWS.append(self)
 
