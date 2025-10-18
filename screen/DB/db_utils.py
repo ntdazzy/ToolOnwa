@@ -7,7 +7,11 @@ from __future__ import annotations
 import contextlib
 import datetime as _dt
 import inspect
+import os
 import re
+import sys
+import threading
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 try:
@@ -20,6 +24,8 @@ except Exception:
 from screen.DB import cmd_sql_plus
 
 _Driver = Any
+_THICK_INIT_LOCK = threading.Lock()
+_THICK_STATE = {"initialized": False, "error": "", "lib_dir": ""}
 
 SYSTEM_SCHEMAS: set[str] = {
     "SYS",
@@ -75,6 +81,134 @@ class OracleDriverNotAvailable(RuntimeError):
     """Raised when oracledb / cx_Oracle driver cannot be imported."""
 
 
+def _resource_root() -> Path:
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        return Path(base)
+    # screen/DB/ -> screen -> project root
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def _client_library_candidates() -> Iterable[Path]:
+    """
+    Yield potential Oracle Client library directories to try for thick mode.
+    """
+    candidates: List[Path] = []
+
+    def _add(path: str | Path | None) -> None:
+        if not path:
+            return
+        p = Path(path).expanduser()
+        for variant in (p, p / "bin", p / "lib"):
+            if variant not in candidates:
+                candidates.append(variant)
+
+    env_vars = [
+        os.environ.get("ORACLE_CLIENT_LIB_DIR"),
+        os.environ.get("TOOLVIP_ORACLE_CLIENT_DIR"),
+        os.environ.get("ORACLE_HOME"),
+    ]
+    for value in env_vars:
+        _add(value)
+
+    base_ora = _resource_root() / "ora"
+    if base_ora.exists():
+        for item in base_ora.iterdir():
+            if item.is_dir():
+                _add(item)
+
+    cwd = Path.cwd()
+    for name in ("instantclient", "InstantClient"):
+        potential = cwd / name
+        if potential.is_dir():
+            _add(potential)
+
+    path_env = os.environ.get("PATH", "")
+    for entry in path_env.split(os.pathsep):
+        entry = entry.strip().strip('"')
+        if entry:
+            _add(entry)
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            resolved = candidate
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        yield candidate
+
+
+def _has_client_library(directory: Path) -> bool:
+    if not directory.is_dir():
+        return False
+
+    if sys.platform.startswith("win"):
+        targets = ("oci.dll",)
+    elif sys.platform == "darwin":
+        targets = ("libclntsh.dylib",)
+    else:
+        targets = ("libclntsh.so",)
+
+    for target in targets:
+        if (directory / target).exists():
+            return True
+        if not sys.platform.startswith("win"):
+            # allow versioned filenames such as libclntsh.so.21.1
+            if any(directory.glob(f"{target}*")):
+                return True
+    return False
+
+
+def _select_client_dir() -> Optional[str]:
+    for candidate in _client_library_candidates():
+        if _has_client_library(candidate):
+            try:
+                return str(candidate.resolve())
+            except Exception:
+                return str(candidate)
+    return None
+
+
+def _ensure_thick_mode(driver: _Driver) -> bool:
+    init_client = getattr(driver, "init_oracle_client", None)
+    if not callable(init_client):
+        return False
+
+    with _THICK_INIT_LOCK:
+        if _THICK_STATE["initialized"]:
+            return True
+        if _THICK_STATE["error"]:
+            return False
+
+        lib_dir = _select_client_dir()
+        try:
+            if lib_dir:
+                init_client(lib_dir=lib_dir)
+            else:
+                init_client()
+        except Exception as exc:
+            hint = (
+                "Không thể khởi tạo Oracle thick mode. "
+                "Vui lòng cài đặt Oracle Instant Client và đặt biến môi trường "
+                "ORACLE_CLIENT_LIB_DIR hoặc TOOLVIP_ORACLE_CLIENT_DIR trỏ tới thư mục chứa oci.dll."
+            )
+            _THICK_STATE["error"] = f"{hint} Chi tiết: {exc}"
+            return False
+        else:
+            _THICK_STATE["initialized"] = True
+            _THICK_STATE["lib_dir"] = lib_dir or ""
+            return True
+
+
+def _is_thin_password_issue(exc: Exception) -> bool:
+    text = " ".join(str(part) for part in getattr(exc, "args", ()) if part)
+    text = text or str(exc)
+    return "DPY-3015" in text
+
+
 def _supports_encoding_kwarg(driver: _Driver) -> bool:
     """
     Return True if the driver.connect callable accepts an 'encoding' keyword.
@@ -115,6 +249,16 @@ def build_dsn(host: str, port: str, alias_or_service: str, use_host_port: bool) 
     return cmd_sql_plus.build_dsn(host, port, alias_or_service, use_host_port)
 
 
+def _connect(driver: _Driver, kwargs: Dict[str, Any]):
+    try:
+        return driver.connect(**kwargs)
+    except TypeError as exc:
+        if "encoding" in kwargs and "encoding" in str(exc):
+            clean_kwargs = {k: v for k, v in kwargs.items() if k != "encoding"}
+            return driver.connect(**clean_kwargs)
+        raise
+
+
 def connect_oracle(
     user: str,
     password: str,
@@ -133,12 +277,19 @@ def connect_oracle(
     if _supports_encoding_kwarg(driver):
         connect_kwargs["encoding"] = encoding
     try:
-        return driver.connect(**connect_kwargs)
-    except TypeError as exc:
-        # python-oracledb in thin mode rejects the encoding kwarg, so retry without it.
-        if "encoding" in connect_kwargs and "encoding" in str(exc):
-            connect_kwargs.pop("encoding", None)
-            return driver.connect(**connect_kwargs)
+        return _connect(driver, dict(connect_kwargs))
+    except Exception as exc:
+        if _is_thin_password_issue(exc):
+            if _ensure_thick_mode(driver):
+                return _connect(driver, dict(connect_kwargs))
+            hint = _THICK_STATE["error"] or (
+                "Không tìm thấy thư viện Oracle Instant Client (oci.dll). "
+                "Vui lòng cài đặt Oracle Instant Client và cấu hình biến môi trường "
+                "ORACLE_CLIENT_LIB_DIR hoặc TOOLVIP_ORACLE_CLIENT_DIR."
+            )
+            raise RuntimeError(
+                f"Kết nối cần Oracle thick mode do password verifier cũ. {hint}"
+            ) from exc
         raise
 
 

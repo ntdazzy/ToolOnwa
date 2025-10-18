@@ -8,8 +8,9 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from tkinter import font as tkfont
 from tkinter.scrolledtext import ScrolledText
-from screen.DB import edit_connection
 from screen.DB import cmd_sql_plus
+from screen.DB import db_utils
+from screen.DB import edit_connection
 from screen.DB import insert as insert_screen
 from screen.DB import update as update_screen
 from screen.DB import backup as backup_screen
@@ -78,23 +79,39 @@ def save_config(cfg):
 def load_config():
     ensure_configs_dir()
     if not os.path.isfile(CONFIG_PATH):
-        cfg = {"lang":"VN","ora_path":DEFAULT_ORA_PATH,"last_alias":None,"use_host_port":False}
+        cfg = {
+            "lang":"VN",
+            "ora_path":DEFAULT_ORA_PATH,
+            "last_alias":None,
+            "use_host_port":False,
+            "oracle_client_dir":"",
+        }
         save_config(cfg)
-                # fallback if saved ora_path missing
+        # fallback if saved ora_path missing
         if not os.path.isfile(cfg.get("ora_path","")):
-            cfg["ora_path"] = DEFAULT_ORA_PATH; save_config(cfg)
+            cfg["ora_path"] = DEFAULT_ORA_PATH
+            save_config(cfg)
         return cfg
     try:
         with open(CONFIG_PATH,"r",encoding="utf-8") as f:
             cfg=json.load(f)
             if cfg.get("lang") in ("vi","ja"):
                 cfg["lang"]="VN" if cfg["lang"]=="vi" else "JP"
-                    # fallback if saved ora_path missing
+            cfg.setdefault("oracle_client_dir", "")
+            cfg.setdefault("use_host_port", cfg.get("use_host_port", False))
+        # fallback if saved ora_path missing
         if not os.path.isfile(cfg.get("ora_path","")):
-            cfg["ora_path"] = DEFAULT_ORA_PATH; save_config(cfg)
+            cfg["ora_path"] = DEFAULT_ORA_PATH
+            save_config(cfg)
         return cfg
     except Exception:
-        return {"lang":"VN","ora_path":DEFAULT_ORA_PATH,"last_alias":None,"use_host_port":False}
+        return {
+            "lang":"VN",
+            "ora_path":DEFAULT_ORA_PATH,
+            "last_alias":None,
+            "use_host_port":False,
+            "oracle_client_dir":"",
+        }
 
 def ensure_db_list_file():
     ensure_configs_dir()
@@ -130,6 +147,9 @@ class ToolVIP(tk.Tk):
         self.resizable(False, False)
 
         self.config = load_config()
+        client_lib_dir = self.config.get("oracle_client_dir") or ""
+        if client_lib_dir:
+            os.environ["TOOLVIP_ORACLE_CLIENT_DIR"] = client_lib_dir
         preferred_lang = self.config.get("lang", i18n.LANG_VI)
         i18n.set_language(preferred_lang)
         self.lang = i18n.get_language()
@@ -383,6 +403,9 @@ class ToolVIP(tk.Tk):
                 save_config(self.config)
             else:
                 return
+        tns_dir = os.path.dirname(path)
+        if tns_dir:
+            os.environ["TNS_ADMIN"] = tns_dir
         try:
             with open(path,"r",encoding="utf-8",errors="ignore") as f: text=f.read()
             self.conn_blocks=parse_tnsnames_blocks(text)
@@ -431,9 +454,9 @@ class ToolVIP(tk.Tk):
         user=self.ent_user.get().strip(); pwd=self.ent_pass.get().strip()
         host=self.ent_host.get().strip(); port=self.ent_port.get().strip()
         data_src=self.ent_dsn.get().strip()
+        use_host_port = bool(self.var_use_host_port.get())
         if not (user and pwd and data_src):
             messagebox.showwarning(APP_TITLE, self._t("main.msg.missing_credentials")); return
-        dsn = f"{host}:{port}/{data_src}" if (self.var_use_host_port.get() and host and port) else data_src
 
         loading = tk.Toplevel(self)
         loading.title("Checking...")
@@ -458,11 +481,14 @@ class ToolVIP(tk.Tk):
 
         def worker():
             try:
-                try:
-                    import oracledb as driver
-                except Exception:
-                    import cx_Oracle as driver  # type: ignore
-                conn = driver.connect(user=user, password=pwd, dsn=dsn)
+                conn = db_utils.connect_oracle(
+                    user=user,
+                    password=pwd,
+                    host=host,
+                    port=port,
+                    alias_or_service=data_src,
+                    use_host_port=use_host_port,
+                )
                 conn.close()
                 result["ok"] = True
             except Exception as e:
@@ -642,13 +668,6 @@ class ToolVIP(tk.Tk):
 
 def main(): app=ToolVIP(); app.mainloop()
 if __name__=="__main__": main()
-
-
-
-
-
-
-
 
 
 
