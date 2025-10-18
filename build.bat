@@ -49,7 +49,8 @@ pyinstaller main.py ^
   --hidden-import screen.MU.log_viewer ^
   --hidden-import core.i18n ^
   --hidden-import core.history ^
-  --hidden-import core.templates
+  --hidden-import core.templates ^
+  --hidden-import cryptography
 
 echo.
 echo === DONE ===

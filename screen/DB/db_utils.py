@@ -10,6 +10,11 @@ import inspect
 import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+try:
+    import cryptography  # type: ignore  # noqa: F401  # ensure thin mode dependency is bundled
+except Exception:
+    cryptography = None  # type: ignore
+
 from screen.DB import cmd_sql_plus
 
 _Driver = Any
