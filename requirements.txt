@@ -1,3 +1,4 @@
 oracledb
+cryptography
 pyinstaller
 requests

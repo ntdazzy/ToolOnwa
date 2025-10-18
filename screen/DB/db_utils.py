@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as _dt
+import inspect
 import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -67,6 +68,22 @@ class OracleDriverNotAvailable(RuntimeError):
     """Raised when oracledb / cx_Oracle driver cannot be imported."""
 
 
+def _supports_encoding_kwarg(driver: _Driver) -> bool:
+    """
+    Return True if the driver.connect callable accepts an 'encoding' keyword.
+    """
+    if getattr(driver, "__name__", "") == "cx_Oracle":
+        return True
+    connect = getattr(driver, "connect", None)
+    if connect is None:
+        return False
+    try:
+        sig = inspect.signature(connect)
+    except (TypeError, ValueError):
+        return False
+    return "encoding" in sig.parameters
+
+
 def load_driver() -> _Driver:
     """
     Return an Oracle driver module (oracledb preferred, fallback cx_Oracle).
@@ -105,7 +122,17 @@ def connect_oracle(
     """
     driver = load_driver()
     dsn = build_dsn(host, port, alias_or_service, use_host_port)
-    return driver.connect(user=user, password=password, dsn=dsn, encoding=encoding)
+    connect_kwargs = {"user": user, "password": password, "dsn": dsn}
+    if _supports_encoding_kwarg(driver):
+        connect_kwargs["encoding"] = encoding
+    try:
+        return driver.connect(**connect_kwargs)
+    except TypeError as exc:
+        # python-oracledb in thin mode rejects the encoding kwarg, so retry without it.
+        if "encoding" in connect_kwargs and "encoding" in str(exc):
+            connect_kwargs.pop("encoding", None)
+            return driver.connect(**connect_kwargs)
+        raise
 
 
 def _split_owner_table(raw_name: str, default_owner: str) -> tuple[str, str]:
