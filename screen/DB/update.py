@@ -665,8 +665,14 @@ class UpdateWindow(tk.Toplevel):
             if self.conn:
                 self.conn.close()
         except Exception as exc:
-            self._log_exception("Failed to close update connection", exc)
+            if not self._is_expected_close_error(exc):
+                self._log_exception("Failed to close update connection", exc)
         self.destroy()
+
+    @staticmethod
+    def _is_expected_close_error(exc: Exception) -> bool:
+        text = str(exc)
+        return "DPY-4011" in text or "ORA-03113" in text or "ORA-03135" in text
 
     def _log_history_status(self, status: str, message: str, row_count: int, sql_text: str, table: Optional[str]) -> None:
         """Cap nhat lich su update voi trang thai chon."""

@@ -604,8 +604,14 @@ class InsertWindow(tk.Toplevel):
             if self.conn:
                 self.conn.close()
         except Exception as exc:
-            self._log_exception("Failed to close insert connection", exc)
+            if not self._is_expected_close_error(exc):
+                self._log_exception("Failed to close insert connection", exc)
         self.destroy()
+
+    @staticmethod
+    def _is_expected_close_error(exc: Exception) -> bool:
+        text = str(exc)
+        return "DPY-4011" in text or "ORA-03113" in text or "ORA-03135" in text
 
     def destroy(self):
         """Hủy toplevel và gỡ listener ngôn ngữ."""

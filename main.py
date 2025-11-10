@@ -846,21 +846,38 @@ class ToolVIP(tk.Tk):
         _finished = {"v": False}  # guard chá»‘ng gá»i finish 2 láº§n
 
         def worker():
-            try:
+            def _attempt(use_host_port_override: bool):
                 conn = db_utils.connect_oracle(
                     user,
                     pwd,
                     host,
                     port,
                     data_src,
-                    bool(self.var_use_host_port.get()),
+                    use_host_port_override,
                 )
                 conn.close()
+
+            try:
+                force_host = self._should_use_host_port(data_src, host, port)
+                _attempt(force_host)
                 result["ok"] = True
             except db_utils.OracleDriverNotAvailable as exc:
                 self._logger.error("Oracle driver not available: %s", exc)
                 result["msg"] = str(exc)
             except Exception as exc:
+                if (
+                    not force_host
+                    and host
+                    and port
+                    and self._is_tns_encoding_error(exc)
+                ):
+                    try:
+                        self._logger.warning("Retrying connection using host/port due to encoding error")
+                        _attempt(True)
+                        result["ok"] = True
+                        return
+                    except Exception as inner_exc:
+                        exc = inner_exc
                 self._logger.exception("Connection check failed for %s", data_src)
                 result["msg"] = str(exc)
             finally:
@@ -1073,8 +1090,9 @@ class ToolVIP(tk.Tk):
         alias= self.ent_dsn.get().strip(); host = self.ent_host.get().strip(); port = self.ent_port.get().strip()
         if not (user and pwd and alias):
             messagebox.showwarning(APP_TITLE, self._t("main.msg.missing_credentials")); return
+        use_host_port = self._should_use_host_port(alias, host, port)
         try:
-            cmd_sql_plus.open_sqlplus(user, pwd, host, port, alias, self.var_use_host_port.get())
+            cmd_sql_plus.open_sqlplus(user, pwd, host, port, alias, use_host_port)
         except Exception as exc:
             self._logger.exception("Failed to open SQL*Plus for %s", alias)
             messagebox.showerror(APP_TITLE, self._t("main.msg.sqlplus_error", error=str(exc)))
@@ -1088,13 +1106,14 @@ class ToolVIP(tk.Tk):
         if not user or not password or not alias:
             messagebox.showwarning(APP_TITLE, self._t("main.msg.need_user_pass_alias"))
             return None
+        use_host_port = self._should_use_host_port(alias, host, port)
         return {
             "user": user,
             "password": password,
             "alias": alias,
             "host": host,
             "port": port,
-            "use_host_port": bool(self.var_use_host_port.get()),
+            "use_host_port": use_host_port,
         }
 
     def _open_rds_info(self):
@@ -1164,6 +1183,25 @@ class ToolVIP(tk.Tk):
         except Exception as exc:
             self._logger.exception("Failed to open data compare window")
             messagebox.showerror(APP_TITLE, self._t("main.msg.generic_error", error=str(exc)))
+
+    def _should_use_host_port(self, alias: str, host: str, port: str) -> bool:
+        if self.var_use_host_port.get():
+            return True
+        if not (host and port):
+            return False
+        alias = (alias or "").strip()
+        if not alias:
+            return True
+        upper_alias = alias.upper()
+        if alias.startswith("(") or "HOST=" in upper_alias or ":" in alias:
+            return False
+        return True
+
+    @staticmethod
+    def _is_tns_encoding_error(exc: Exception) -> bool:
+        text = repr(exc)
+        needle = ("UnicodeDecodeError", "illegal multibyte sequence", "cp932")
+        return any(term in text for term in needle)
 
 def main(): app=ToolVIP(); app.mainloop()
 if __name__=="__main__": main()
