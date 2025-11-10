@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_data_files
 from PyInstaller.utils.hooks import collect_submodules
 
 datas = [('core\\configs', 'core/configs'), ('ora', 'ora'), ('fonts', 'fonts'), ('icons', 'icons'), ('screen', 'screen')]
-hiddenimports = ['screen.DB.edit_connection', 'screen.DB.cmd_sql_plus', 'screen.DB.backup', 'screen.DB.compare', 'screen.DB.db_utils', 'screen.DB.insert', 'screen.DB.update', 'screen.DB.widgets', 'screen.DB.template_dialog', 'screen.General.bikipvocong', 'screen.General.history_window', 'screen.General.data_compare', 'screen.General.rdsinfo', 'screen.General.tailieu', 'screen.MU.log_viewer', 'core.i18n', 'core.history', 'core.templates', 'cryptography', 'cryptography.x509']
+hiddenimports = ['screen.DB.edit_connection', 'screen.DB.cmd_sql_plus', 'screen.DB.backup', 'screen.DB.compare', 'screen.DB.db_utils', 'screen.DB.insert', 'screen.DB.update', 'screen.DB.widgets', 'screen.DB.template_dialog', 'screen.General.bikipvocong', 'screen.General.history_window', 'screen.General.data_compare', 'screen.General.rdsinfo', 'screen.General.tailieu', 'screen.MU.log_viewer', 'tksheet', 'core.i18n', 'core.history', 'core.templates', 'cryptography', 'cryptography.x509']
 datas += collect_data_files('oracledb')
 datas += collect_data_files('cryptography')
 hiddenimports += collect_submodules('cryptography')

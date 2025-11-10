@@ -328,14 +328,13 @@ NPDB.ONNP_DOM =
       (SID = NPDB)
     )
   )
-
-
 ORCL =
   (DESCRIPTION =
-    (ADDRESS = (PROTOCOL = TCP)(HOST = 192.169.83.208)(PORT = 1521))
+    (ADDRESS_LIST =
+      (ADDRESS = (PROTOCOL = TCP)(HOST = 172.96.55.72)(PORT = 1522))
+    )
     (CONNECT_DATA =
-      (SERVER = DEDICATED)
-      (SERVICE_NAME = SIP02)
+      (SERVICE_NAME = ORCL)
     )
   )
 

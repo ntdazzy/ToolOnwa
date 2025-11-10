@@ -139,7 +139,7 @@ class InsertWindow(tk.Toplevel):
     def _style_data_grid(self, tree: ttk.Treeview, style_name: str):
         style = ttk.Style(tree)
         base_font = tkfont.nametofont("TkDefaultFont").copy()
-        base_font.configure(size=8)
+        base_font.configure(size=4)
         try:
             heading_font = tkfont.nametofont("TkHeadingFont").copy()
         except tk.TclError:
@@ -459,8 +459,12 @@ class InsertWindow(tk.Toplevel):
         if not self._columns:
             messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("insert.msg.no_table"), parent=self)
             return
-        table = self._current_table()
-        if not table:
+        table_full = self._current_table()
+        if not table_full:
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("insert.msg.no_table"), parent=self)
+            return
+        table_name = self._table_sql_name()
+        if not table_name:
             messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("insert.msg.no_table"), parent=self)
             return
         sql_lines: List[str] = []
@@ -473,7 +477,7 @@ class InsertWindow(tk.Toplevel):
                 literal = db_utils.format_sql_literal(row.get(col), meta)
                 formatted_row[col] = literal
                 values.append(literal)
-            sql_lines.append(f"INSERT INTO {table} VALUES({', '.join(values)});")
+            sql_lines.append(f"INSERT INTO {table_name} VALUES({', '.join(values)});")
             formatted_rows.append(row)
         sql_text = "\n".join(sql_lines)
         if sql_text:
@@ -481,7 +485,7 @@ class InsertWindow(tk.Toplevel):
         self.txt_sql.delete("1.0", tk.END)
         self.txt_sql.insert(tk.END, sql_text)
         self._generated_rows = formatted_rows
-        self._record_history_draft(table, sql_text, len(rows))
+        self._record_history_draft(table_name, sql_text, len(rows))
 
     def _record_history_draft(self, table: str, sql_text: str, row_count: int) -> None:
         """Ghi log ban nhap SQL o trang thai nhap."""
@@ -546,6 +550,10 @@ class InsertWindow(tk.Toplevel):
         if not table:
             messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("insert.msg.no_table"), parent=self)
             return
+        table_name = self._table_sql_name()
+        if not table_name:
+            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("insert.msg.no_table"), parent=self)
+            return
         rows = self.grid.get_all()
         if not rows:
             messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("insert.msg.no_data_execute"), parent=self)
@@ -589,7 +597,7 @@ class InsertWindow(tk.Toplevel):
                     dup_user.append(row)
             dlg = DuplicatePreviewDialog(
                 self,
-                table_name=table,
+                table_name=table_name,
                 columns=self._columns,
                 pk_columns=pk_cols,
                 user_rows=dup_user,
@@ -635,6 +643,14 @@ class InsertWindow(tk.Toplevel):
         if not self._active_table:
             return None
         return self._active_table["full"]
+
+    def _table_sql_name(self) -> Optional[str]:
+        """Return table name without datasource/schema prefixes for SQL text."""
+        table_full = self._current_table()
+        if not table_full:
+            return None
+        _, table_name = db_utils.split_owner_table(table_full, self.current_owner)
+        return table_name
 
     def _on_close(self):
         """Đóng cửa sổ và giải phóng kết nối."""
