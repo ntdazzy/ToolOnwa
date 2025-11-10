@@ -12,8 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from screen.DB import db_utils
 from screen.DB.widgets import ColumnOrderDialog, DataGrid, DuplicatePreviewDialog, LoadingPopup
-from core import history, i18n, templates
-from screen.DB.template_dialog import TemplateLibraryDialog, TemplateSaveDialog
+from core import history, i18n
 
 APP_TITLE_KEY = "common.app_title"
 
@@ -78,22 +77,26 @@ class InsertWindow(tk.Toplevel):
 
         self.frm_top = ttk.Frame(self.frm_main)
         self.frm_top.grid(row=0, column=0, sticky="ew")
-        for index in range(3):
-            self.frm_top.columnconfigure(index, weight=0 if index else 1)
+        self.frm_top.columnconfigure(0, weight=1)
+        self.frm_top.columnconfigure(1, weight=0)
+        self.frm_top.columnconfigure(2, weight=0)
 
         self._build_search(self.frm_top)
         self._build_actions(self.frm_top)
         self._build_connection(self.frm_top)
 
-        self.frm_middle = ttk.Frame(self.frm_main)
-        self.frm_middle.grid(row=1, column=0, sticky="nsew", pady=(8, 6))
-        self.frm_middle.rowconfigure(0, weight=1)
-        self.frm_middle.columnconfigure(0, weight=1)
+        self.content_pane = ttk.Panedwindow(self.frm_main, orient="vertical")
+        self.content_pane.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
 
-        self.grid = DataGrid(self.frm_middle)
+        grid_section = ttk.Frame(self.content_pane)
+        grid_section.columnconfigure(0, weight=1)
+        grid_section.rowconfigure(0, weight=1)
+        self.content_pane.add(grid_section, weight=3)
+
+        self.grid = DataGrid(grid_section)
         self.grid.grid(row=0, column=0, sticky="nsew")
 
-        self.btn_bar = ttk.Frame(self.frm_middle)
+        self.btn_bar = ttk.Frame(grid_section)
         self.btn_bar.grid(row=1, column=0, sticky="e", pady=(6, 0))
         self.btn_import_csv = ttk.Button(self.btn_bar, text=self._t("insert.btn.import_csv"), command=self.grid.import_csv_dialog)
         self.btn_import_csv.pack(side="left", padx=4)
@@ -102,16 +105,21 @@ class InsertWindow(tk.Toplevel):
         self.btn_add_row = ttk.Button(self.btn_bar, text=self._t("insert.btn.add_row"), command=lambda: self.grid.append_dict({}))
         self.btn_add_row.pack(side="left", padx=4)
 
+        sql_section = ttk.Frame(self.content_pane)
+        sql_section.columnconfigure(0, weight=1)
+        sql_section.rowconfigure(0, weight=1)
+        self.content_pane.add(sql_section, weight=1)
+
         self.frm_sql = ttk.LabelFrame(
-            self.frm_main,
+            sql_section,
             text=self._t("insert.section.sql", table=self._current_table_label),
             padding=6,
         )
-        self.frm_sql.grid(row=2, column=0, sticky="nsew")
+        self.frm_sql.grid(row=0, column=0, sticky="nsew")
         self.frm_sql.rowconfigure(0, weight=1)
         self.frm_sql.columnconfigure(0, weight=1)
 
-        self.txt_sql = ScrolledText(self.frm_sql, height=8, wrap="word")
+        self.txt_sql = ScrolledText(self.frm_sql, height=6, wrap="word")
         self.txt_sql.grid(row=0, column=0, sticky="nsew")
 
 
@@ -127,7 +135,7 @@ class InsertWindow(tk.Toplevel):
         self.ent_search = ttk.Entry(self.grp_search, textvariable=self.var_search)
         self.ent_search.grid(row=1, column=0, sticky="ew", pady=4)
         self.ent_search.bind("<KeyRelease>", lambda _event: self._filter_tables())
-        self.list_tables = tk.Listbox(self.grp_search, height=10)
+        self.list_tables = tk.Listbox(self.grp_search, height=8)
         self.list_tables.grid(row=2, column=0, sticky="nsew", pady=(0, 4))
         self.list_tables.bind("<<ListboxSelect>>", self._on_select_table)
         self.grp_search.rowconfigure(2, weight=1)
@@ -140,18 +148,10 @@ class InsertWindow(tk.Toplevel):
         self.grp_actions.grid(row=0, column=1, sticky="n", padx=(0, 8))
         self.btn_build_sql = ttk.Button(self.grp_actions, text=self._t("insert.btn.build_sql"), command=self._generate_sql)
         self.btn_build_sql.grid(row=0, column=0, sticky="ew", pady=4)
-        self.btn_save_template = ttk.Button(self.grp_actions, text=self._t("insert.btn.save_template"), command=self._save_template)
-        self.btn_save_template.grid(row=1, column=0, sticky="ew", pady=4)
-        self.btn_select_template = ttk.Button(self.grp_actions, text=self._t("insert.btn.select_template"), command=self._open_template_library)
-        self.btn_select_template.grid(row=2, column=0, sticky="ew", pady=4)
-        self.btn_copy = ttk.Button(self.grp_actions, text=self._t("common.copy"), command=self._copy_sql)
-        self.btn_copy.grid(row=3, column=0, sticky="ew", pady=4)
         self.btn_reorder = ttk.Button(self.grp_actions, text=self._t("insert.btn.reorder"), command=self._change_column_order)
-        self.btn_reorder.grid(row=4, column=0, sticky="ew", pady=4)
-        self.btn_execute = ttk.Button(self.grp_actions, text=self._t("insert.btn.execute"), command=self._execute)
-        self.btn_execute.grid(row=5, column=0, sticky="ew", pady=4)
+        self.btn_reorder.grid(row=1, column=0, sticky="ew", pady=4)
         self.btn_clear = ttk.Button(self.grp_actions, text=self._t("insert.btn.clear"), command=self._clear)
-        self.btn_clear.grid(row=6, column=0, sticky="ew", pady=4)
+        self.btn_clear.grid(row=2, column=0, sticky="ew", pady=4)
 
 
 
@@ -391,11 +391,7 @@ class InsertWindow(tk.Toplevel):
         state = "normal" if enabled else "disabled"
         targets = [
             getattr(self, "btn_build_sql", None),
-            getattr(self, "btn_save_template", None),
-            getattr(self, "btn_select_template", None),
-            getattr(self, "btn_copy", None),
             getattr(self, "btn_reorder", None),
-            getattr(self, "btn_execute", None),
             getattr(self, "btn_clear", None),
             getattr(self, "btn_import_csv", None),
             getattr(self, "btn_export_csv", None),
@@ -440,7 +436,9 @@ class InsertWindow(tk.Toplevel):
                 values.append(literal)
             sql_lines.append(f"INSERT INTO {table} ({column_list}) VALUES ({', '.join(values)});")
             formatted_rows.append(row)
-        sql_text = "".join(sql_lines)
+        sql_text = "\n".join(sql_lines)
+        if sql_text:
+            sql_text += "\n"
         self.txt_sql.delete("1.0", tk.END)
         self.txt_sql.insert(tk.END, sql_text)
         self._generated_rows = formatted_rows
@@ -466,41 +464,6 @@ class InsertWindow(tk.Toplevel):
         except Exception as exc:
             self._draft_history_id = None
             self._log_exception("Failed to record insert draft history", exc)
-
-    def _copy_sql(self):
-        """Copy câu SQL đã sinh vào clipboard."""
-        data = self.txt_sql.get("1.0", tk.END).strip()
-        if not data:
-            return
-        self.clipboard_clear()
-        self.clipboard_append(data)
-        messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("insert.msg.copy_done"), parent=self)
-
-    def _save_template(self):
-        """Luu cau SQL hien tai vao thu vien template."""
-        sql_text = self.txt_sql.get("1.0", tk.END).strip()
-        if not sql_text:
-            messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("template.save.message_no_sql"), parent=self)
-            return
-        default_name = self._current_table() or self._current_table_label or "INSERT_SQL"
-        dlg = TemplateSaveDialog(self, default_type="insert", default_name=default_name)
-        self.wait_window(dlg)
-        data = getattr(dlg, "result", None)
-        if not data:
-            return
-        tpl = templates.add_template(data["name"], data["type"], sql_text, data.get("description", ""))
-        if tpl:
-            messagebox.showinfo(self._t(APP_TITLE_KEY), self._t("template.save.message_saved"), parent=self)
-        else:
-            messagebox.showerror(self._t(APP_TITLE_KEY), self._t("common.error"), parent=self)
-
-    def _open_template_library(self):
-        """Mo thu vien template de chon cau SQL co san."""
-        dlg = TemplateLibraryDialog(self, template_type="insert")
-        self.wait_window(dlg)
-        record = getattr(dlg, "result", None)
-        if record and record.get("content"):
-            self.set_sql_text(record["content"])
 
     def set_sql_text(self, sql_text: str) -> None:
         """Dat lai noi dung SQL va dua cua so len truoc."""
@@ -723,16 +686,8 @@ class InsertWindow(tk.Toplevel):
             self.grp_actions.config(text=self._t("insert.section.actions"))
         if hasattr(self, "btn_build_sql"):
             self.btn_build_sql.config(text=self._t("insert.btn.build_sql"))
-        if hasattr(self, "btn_save_template"):
-            self.btn_save_template.config(text=self._t("insert.btn.save_template"))
-        if hasattr(self, "btn_select_template"):
-            self.btn_select_template.config(text=self._t("insert.btn.select_template"))
-        if hasattr(self, "btn_copy"):
-            self.btn_copy.config(text=self._t("common.copy"))
         if hasattr(self, "btn_reorder"):
             self.btn_reorder.config(text=self._t("insert.btn.reorder"))
-        if hasattr(self, "btn_execute"):
-            self.btn_execute.config(text=self._t("insert.btn.execute"))
         if hasattr(self, "btn_clear"):
             self.btn_clear.config(text=self._t("insert.btn.clear"))
         if hasattr(self, "grp_connection"):

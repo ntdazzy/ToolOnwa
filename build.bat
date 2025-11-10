@@ -45,6 +45,7 @@ python -m PyInstaller main.py ^
   --hidden-import screen.DB.template_dialog ^
   --hidden-import screen.General.bikipvocong ^
   --hidden-import screen.General.history_window ^
+  --hidden-import screen.General.data_compare ^
   --hidden-import screen.General.rdsinfo ^
   --hidden-import screen.General.tailieu ^
   --hidden-import screen.MU.log_viewer ^

@@ -579,6 +579,7 @@ class RestoreFromBackupWindow(BackupRestoreBase):
     def __init__(self, parent: tk.Widget, connection: Dict[str, str]):
         super().__init__(parent, connection, title_key="backup.restore_backup.title")
         self._history_action_type = "restore_backup_sql"
+        self.var_target_table = tk.StringVar()
 
     def _build_body(self, parent: ttk.Frame):
         """Xây dựng giao diện dành cho restore từ bảng backup."""
@@ -586,7 +587,7 @@ class RestoreFromBackupWindow(BackupRestoreBase):
 
         self.lbl_target = ttk.Label(parent, text=self._t("backup.label.target_table"))
         self.lbl_target.grid(row=0, column=0, sticky="w")
-        self.ent_target = ttk.Entry(parent, textvariable=self.var_selected_table, state="readonly")
+        self.ent_target = ttk.Entry(parent, textvariable=self.var_target_table, state="readonly")
         self.ent_target.grid(row=1, column=0, sticky="ew", pady=(0, 6))
 
         self.lbl_backup_source = ttk.Label(parent, text=self._t("backup.label.backup_source_table"))
@@ -607,7 +608,7 @@ class RestoreFromBackupWindow(BackupRestoreBase):
         self.frm_buttons.grid(row=5, column=0, sticky="ew", pady=6)
         self.frm_buttons.columnconfigure(0, weight=1)
         self.frm_buttons.columnconfigure(1, weight=1)
-        self.btn_refresh_sql = ttk.Button(self.frm_buttons, text=self._t("backup.btn.refresh_sql"), command=self._fill_backup_sql)
+        self.btn_refresh_sql = ttk.Button(self.frm_buttons, text=self._t("backup.btn.refresh_sql"), command=self._fill_restore_sql)
         self.btn_refresh_sql.grid(row=0, column=0, sticky="ew", padx=(0, 4))
         self.btn_execute = ttk.Button(self.frm_buttons, text=self._t("backup.btn.execute"), command=self._execute)
         self.btn_execute.grid(row=0, column=1, sticky="ew")
@@ -645,15 +646,18 @@ class RestoreFromBackupWindow(BackupRestoreBase):
         if not table:
             self.txt_sql.delete("1.0", tk.END)
             self.var_backup_name.set("")
+            self.var_target_table.set("")
             return
         owner, name = self._split_table(table)
-        pattern = f"{owner}.{name}_BK_{dt.datetime.now().strftime('%Y%m%d')}"
-        self.var_backup_name.set(pattern)
+        full_backup = f"{owner}.{name}"
+        rebuilt_target, _ = self._strip_backup_suffix(owner, name)
+        self.var_backup_name.set(full_backup)
+        self.var_target_table.set(rebuilt_target)
         self._fill_restore_sql()
 
     def _fill_restore_sql(self):
         """Sinh SQL restore dữ liệu từ bảng backup sang bảng đích."""
-        target = self.var_selected_table.get().strip()
+        target = self.var_target_table.get().strip()
         backup = self.var_backup_name.get().strip()
         if not target or not backup:
             return
@@ -670,7 +674,7 @@ class RestoreFromBackupWindow(BackupRestoreBase):
 
     def _fill_backup_sql(self):
         """Sinh SQL để tái tạo bảng backup từ bảng đích."""
-        table = self.var_selected_table.get().strip()
+        table = self.var_target_table.get().strip()
         backup = self.var_backup_name.get().strip()
         if not table or not backup:
             return
@@ -706,6 +710,37 @@ class RestoreFromBackupWindow(BackupRestoreBase):
             self.btn_refresh_sql.configure(text=self._t("backup.btn.refresh_sql"))
         if hasattr(self, "btn_execute"):
             self.btn_execute.configure(text=self._t("backup.btn.execute"))
+
+    @staticmethod
+    def _strip_backup_suffix(owner: str, table: str) -> tuple[str, bool]:
+        """
+        Remove trailing BK timestamp suffixes so restore target points back to the original table.
+        """
+        base = table
+        changed = False
+        patterns = [
+            r"(.*)_BK_(\d{8})$",
+            r"(.*)_BK(\d{8})$",
+            r"(.*)_BK$",
+        ]
+        for pattern in patterns:
+            match = re.match(pattern, table, flags=re.IGNORECASE)
+            if match:
+                candidate = match.group(1)
+                if candidate:
+                    base = candidate
+                    changed = True
+                    break
+        full = f"{owner}.{base}"
+        return full, changed
+
+    def _history_object_name(self) -> str:
+        target = getattr(self, "var_target_table", None)
+        if isinstance(target, tk.StringVar):
+            value = target.get().strip()
+            if value:
+                return value
+        return super()._history_object_name()
 
 
 class RestoreFromCSVWindow(BackupRestoreBase):

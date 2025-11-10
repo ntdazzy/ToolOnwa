@@ -195,12 +195,17 @@ def _ensure_thick_mode(driver: _Driver) -> None:
             return
 
         last_exc: Optional[Exception] = None
+        tns_dir = os.environ.get("TOOLVIP_TNS_DIR") or os.environ.get("TNS_ADMIN")
+        if tns_dir and not os.path.isdir(tns_dir):
+            tns_dir = None
         for candidate in _iter_oracle_client_dirs():
             try:
+                kwargs: dict[str, Optional[str]] = {}
                 if candidate:
-                    init_client(lib_dir=candidate)
-                else:
-                    init_client()
+                    kwargs["lib_dir"] = candidate
+                if tns_dir:
+                    kwargs["config_dir"] = tns_dir
+                init_client(**kwargs)
                 _THICK_INIT_DONE = True
                 _THICK_INIT_ERROR = None
                 return

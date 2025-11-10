@@ -1,0 +1,167 @@
+;========================================================
+; Marco connect MU & BI
+;========================================================
+timeout = 3
+
+;--- Thông tin chung ---
+HOSTIP_DEV     = 'ec2-52-194-17-213.ap-northeast-1.compute.amazonaws.com'
+HOSTIP_PRD     = 'ec2-18-176-19-35.ap-northeast-1.compute.amazonaws.com'
+USERNAME       = 'ec2-user'
+
+; Lấy thư mục chứa macro
+getdir mydir
+
+; Đường dẫn động cho các file
+strconcat INI_FILE mydir
+strconcat INI_FILE '\TERATERM.INI'
+
+strconcat KEY_FILE_DEV mydir
+strconcat KEY_FILE_DEV '\DEV-CLASS-BASTION-KEY.pem'
+
+strconcat KEY_FILE_PRD mydir
+strconcat KEY_FILE_PRD '\PRD-CLASS-BASTION-KEY.pem'
+
+; Thời gian tối đa phiên (giây) - 3 giờ = 10800
+MAX_SESSION_SECONDS = 10800
+
+;--------------------------
+; 1) Chọn Subsystem (MU/BI)
+;--------------------------
+strdim subs 5
+subs[0] = 'MU'
+subs[1] = 'BI'
+subs[2] = 'CM'
+subs[3] = 'OR'
+subs[4] = 'SJ'
+listbox 'Choose Subsystem' 'Subsystem' subs
+if result = -1 then
+    messagebox 'Cancelled.' 'Alert'
+    end
+endif
+if result > 1 then
+    messagebox 'Chưa Support hẹ hẹ hẹ.' 'Alert'
+    end
+endif
+
+sub_sel = result
+
+;--------------------------
+; 2) Chọn Environment (DEV/PROD)
+;--------------------------
+strdim envs 2
+envs[0] = 'DEV'
+envs[1] = 'PROD'
+listbox 'Choose Environment' 'Environment' envs
+if result = -1 then
+    messagebox 'Cancelled.' 'Alert'
+    end
+endif
+; if result > 0 then
+;     messagebox 'Tính vô honban phá cái gì.' 'Alert'
+;     end
+; endif
+
+env_sel = result
+
+
+;--------------------------
+; 3) Show Mail (chỉ DEV/MU)
+;--------------------------
+mail_sel = 0 ; mặc định NO
+if sub_sel = 0 then
+    if env_sel = 0 then
+        strdim mail 2
+        mail[0] = 'NO'
+        mail[1] = 'YES'
+        listbox 'Want to show Mail Info ?' 'Server' mail
+        if result = -1 then
+            messagebox 'Cancelled.' 'Alert'
+            end
+        endif
+        mail_sel = result
+    endif
+endif
+
+;--------------------------
+; 4) Choose DB Server (nếu mail_sel = YES)
+;--------------------------
+server_sel = -1
+if mail_sel = 1 then
+    strdim server 6
+    server[0] = 'STAGING'
+    server[1] = 'DEV MU01'
+    server[2] = 'DEV MU02'
+    server[3] = 'DEV MU03'
+    server[4] = 'DEV MU04'
+    server[5] = 'DEV MU05'
+    listbox 'Choose DB Server' 'Server' server
+    if result = -1 then
+        messagebox 'Cancelled.' 'Alert'
+        end
+    endif
+    server_sel = result
+endif
+
+;--------------------------
+; 5) Gán KEY_FILE & HOST (Bastion)
+;--------------------------
+if env_sel = 0 then
+    KEY_FILE = KEY_FILE_DEV
+    HOSTIP   = HOSTIP_DEV
+else
+    KEY_FILE = KEY_FILE_PRD
+    HOSTIP   = HOSTIP_PRD
+endif
+
+;--------------------------
+; 6) Tạo lệnh kết nối SSH tới Bastion (publickey)
+;--------------------------
+sprintf2 COMMAND '%s:22 /ssh /auth=publickey /user=%s /keyfile=%s /F=%s' HOSTIP USERNAME KEY_FILE INI_FILE
+
+;--------------------------
+; 7) Hiển thị Alert và kết nối Bastion
+;--------------------------
+sprintf2 STATUS 'Connecting to %s - %s' subs[sub_sel] envs[env_sel]
+statusbox STATUS 'Alert'
+
+connect COMMAND
+if result <> 2 then
+    closesbox
+    ERRMSG = 'SSH Connection Failed.'
+    messagebox ERRMSG 'Error'
+    end
+endif
+
+closesbox
+
+
+if env_sel = 0 then
+    if sub_sel = 0 then
+        if mail_sel = 1 then
+            ; Chuyển server_sel thành chuỗi
+            sprintf2 ser '%d' server_sel
+
+            ; Tạo đường dẫn đến batch
+            BATCH_PATH_STR = mydir
+            strconcat BATCH_PATH_STR '\getmail.bat '
+            strconcat BATCH_PATH_STR ser
+
+            ; Thực thi batch
+            exec BATCH_PATH_STR
+
+            if result <> 0 then
+                messagebox 'Không thể chạy batch getmail!' 'Error'
+                end
+            endif
+        endif
+    endif
+endif
+
+;--------------------------
+; 9) Giữ kết nối trong MAX_SESSION_SECONDS
+;--------------------------
+pause MAX_SESSION_SECONDS
+
+; Khi hết thời gian, đóng session
+closett
+end

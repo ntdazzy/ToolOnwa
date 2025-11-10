@@ -422,131 +422,141 @@ class LogViewerApp:
         container = ttk.Frame(root, padding=12)
         container.pack(fill="both", expand=True)
         container.columnconfigure(0, weight=1)
-        container.rowconfigure(0, weight=1)
+        container.rowconfigure(1, weight=1)
 
-        self.main_pane = ttk.Panedwindow(container, orient="horizontal")
-        self.main_pane.grid(row=0, column=0, sticky="nsew")
-
-        filter_side = ttk.Frame(self.main_pane, padding=(12, 12))
+        filter_side = ttk.Frame(container, padding=(12, 12))
+        filter_side.grid(row=0, column=0, sticky="ew")
         filter_side.columnconfigure(0, weight=1)
-        filter_side.rowconfigure(0, weight=1)
-        self.main_pane.add(filter_side, weight=1)
 
-        content_side = ttk.Frame(self.main_pane, padding=(12, 12))
+        content_side = ttk.Frame(container, padding=(12, 12))
+        content_side.grid(row=1, column=0, sticky="nsew")
         content_side.columnconfigure(0, weight=1)
         content_side.rowconfigure(2, weight=1)
-        self.main_pane.add(content_side, weight=4)
 
         # ----- Filter panel -----
         self.frm_filters = ttk.LabelFrame(filter_side, text=self._("filters_section"), padding=10)
-        self.frm_filters.grid(row=0, column=0, sticky="nsew")
-        self.frm_filters.columnconfigure(1, weight=1)
+        self.frm_filters.grid(row=0, column=0, sticky="ew")
+        for col in range(3):
+            self.frm_filters.columnconfigure(col, weight=1)
 
         controls_row = ttk.Frame(self.frm_filters)
-        controls_row.grid(row=0, column=0, columnspan=2, sticky="ew")
+        controls_row.grid(row=0, column=0, columnspan=3, sticky="ew")
         controls_row.columnconfigure(0, weight=1)
-        self.btn_choose = ttk.Button(controls_row, text=self._("choose_log"), command=self.choose_file)
-        self.btn_choose.grid(row=0, column=0, sticky="ew")
-        self.btn_refresh = ttk.Button(controls_row, text=self._("refresh"), command=self.refresh_file)
-        self.btn_refresh.grid(row=0, column=1, padx=(6, 0))
-        self.btn_reset_filters = ttk.Button(controls_row, text=self._("reset_filters"), command=self.reset_filters)
-        self.btn_reset_filters.grid(row=0, column=2, padx=(6, 0))
+        controls_row.columnconfigure(1, weight=1)
+        left_controls = ttk.Frame(controls_row)
+        left_controls.grid(row=0, column=0, sticky="w")
+        self.btn_choose = ttk.Button(left_controls, text=self._("choose_log"), command=self.choose_file, width=10)
+        self.btn_choose.pack(side="left", padx=(0, 6))
+        self.btn_refresh = ttk.Button(left_controls, text=self._("refresh"), command=self.refresh_file)
+        self.btn_refresh.pack(side="left", padx=(0, 6))
+        self.btn_reset_filters = ttk.Button(left_controls, text=self._("reset_filters"), command=self.reset_filters)
+        self.btn_reset_filters.pack(side="left")
 
-        ttk.Separator(self.frm_filters).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 8))
+        right_controls = ttk.Frame(controls_row)
+        right_controls.grid(row=0, column=1, sticky="e")
+        self.btn_open_folder = ttk.Button(right_controls, text=self._("open_folder"), command=self.open_current_folder)
+        self.btn_open_folder.pack(side="left")
+        self.btn_save_log = ttk.Button(right_controls, text=self._("save_log"), command=self.save_selected_logs, state="disabled")
+        self.btn_save_log.pack(side="left", padx=(6, 0))
+        self.btn_saved_logs = ttk.Button(right_controls, text=self._("view_saved_logs"), command=self.show_saved_logs, state="disabled")
+        self.btn_saved_logs.pack(side="left", padx=(6, 0))
+
+        ttk.Separator(self.frm_filters).grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 8))
 
         row_index = 2
 
-        self.lbl_log_type = ttk.Label(self.frm_filters, text=self._("log_type"))
-        self.lbl_log_type.grid(row=row_index, column=0, sticky="w")
-        type_frame = ttk.Frame(self.frm_filters)
-        type_frame.grid(row=row_index, column=1, sticky="w", padx=(4, 0))
+        log_command_row = ttk.Frame(self.frm_filters)
+        log_command_row.grid(row=row_index, column=0, columnspan=3, sticky="ew", pady=(0, 4))
         self.log_type_var = tk.StringVar(value="SQL")
-        self.rb_sql = ttk.Radiobutton(type_frame, text=self._("sql"), variable=self.log_type_var, value="SQL", command=self.update_filters)
-        self.rb_sql.pack(side="left", padx=(0, 6))
-        self.rb_error = ttk.Radiobutton(type_frame, text=self._("error"), variable=self.log_type_var, value="ERROR", command=self.update_filters)
-        self.rb_error.pack(side="left")
+        log_group = ttk.Frame(log_command_row)
+        log_group.pack(side="left")
+        self.lbl_log_type = ttk.Label(log_group, text=self._("log_type"))
+        self.lbl_log_type.pack(side="left", padx=(0, 6))
+        self.rb_sql = ttk.Radiobutton(log_group, text=self._("sql"), variable=self.log_type_var, value="SQL", command=self.update_filters)
+        self.rb_sql.pack(side="left")
+        self.rb_error = ttk.Radiobutton(log_group, text=self._("error"), variable=self.log_type_var, value="ERROR", command=self.update_filters)
+        self.rb_error.pack(side="left", padx=(12, 0))
+
+        command_group = ttk.Frame(log_command_row)
+        command_group.pack(side="left", padx=24)
+        self.lbl_cmd = ttk.Label(command_group, text=self._("command_type"))
+        self.lbl_cmd.pack(side="left", padx=(0, 6))
+        self.sql_command_var = tk.StringVar(value="ALL")
+        commands_frame = ttk.Frame(command_group)
+        commands_frame.pack(side="left")
+        self.cmd_buttons = []
+        for cmd in ["ALL", "SELECT", "INSERT", "UPDATE", "DELETE"]:
+            btn = ttk.Radiobutton(commands_frame, text=cmd, variable=self.sql_command_var, value=cmd, command=self.refresh_table)
+            btn.pack(side="left", padx=(0, 10))
+            self.cmd_buttons.append(btn)
+
         row_index += 1
 
-        self.lbl_screen = ttk.Label(self.frm_filters, text=self._("screen"))
-        self.lbl_screen.grid(row=row_index, column=0, sticky="w", padx=(0, 6), pady=(6, 2))
-        screen_frame = ttk.Frame(self.frm_filters)
-        screen_frame.grid(row=row_index, column=1, sticky="ew", pady=(6, 2), padx=(4, 0))
-        screen_frame.columnconfigure(0, weight=1)
+        screen_row = ttk.Frame(self.frm_filters)
+        screen_row.grid(row=row_index, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        screen_row.columnconfigure(1, weight=1)
+        screen_row.columnconfigure(3, weight=1)
+        self.lbl_screen = ttk.Label(screen_row, text=self._("screen"))
+        self.lbl_screen.grid(row=0, column=0, sticky="w", padx=(0, 6))
         self.screen_var = tk.StringVar(value="ALL")
-        self.combo_screen = ttk.Combobox(screen_frame, textvariable=self.screen_var, values=["ALL"], state="readonly")
-        self.combo_screen.grid(row=0, column=0, sticky="ew")
+        self.combo_screen = ttk.Combobox(screen_row, textvariable=self.screen_var, values=["ALL"], state="readonly")
+        self.combo_screen.grid(row=0, column=1, sticky="ew")
         self.combo_screen.configure(takefocus=True)
         self.combo_screen.bind("<<ComboboxSelected>>", lambda _e: self.refresh_table())
-        row_index += 1
 
-        self.sql_command_var = tk.StringVar(value="ALL")
-        self.sql_command_row = ttk.Frame(self.frm_filters)
-        self.sql_command_row.grid(row=row_index, column=0, columnspan=2, sticky="ew", pady=(6, 2))
-        self.sql_command_row.columnconfigure(1, weight=1)
-        self.lbl_cmd = ttk.Label(self.sql_command_row, text=self._("command_type"))
-        self.lbl_cmd.grid(row=0, column=0, sticky="nw", padx=(0, 6))
-        commands_frame = ttk.Frame(self.sql_command_row)
-        commands_frame.grid(row=0, column=1, sticky="nw")
-        self.cmd_buttons: List[ttk.Radiobutton] = []
-        for idx, cmd in enumerate(["ALL", "SELECT", "INSERT", "UPDATE", "DELETE"]):
-            btn = ttk.Radiobutton(commands_frame, text=cmd, variable=self.sql_command_var, value=cmd, command=self.refresh_table)
-            btn.grid(row=idx, column=0, sticky="w", pady=1)
-            self.cmd_buttons.append(btn)
-        row_index += 1
-
-        self.search_row = ttk.Frame(self.frm_filters)
-        self.search_row.grid(row=row_index, column=0, columnspan=2, sticky="ew", pady=(6, 2))
-        self.search_row.columnconfigure(1, weight=1)
-        self.lbl_keyword = ttk.Label(self.search_row, text=self._("keyword"))
-        self.lbl_keyword.grid(row=0, column=0, sticky="w", padx=(0, 6))
+        self.lbl_keyword = ttk.Label(screen_row, text=self._("keyword"))
+        self.lbl_keyword.grid(row=0, column=2, sticky="w", padx=(16, 6))
         self.search_var = tk.StringVar()
-        self.entry_search = ttk.Entry(self.search_row, textvariable=self.search_var, width=32)
-        self.entry_search.grid(row=0, column=1, sticky="ew", padx=(0, 8))
-        btn_search_frame = ttk.Frame(self.search_row)
-        btn_search_frame.grid(row=0, column=2, sticky="w")
-        self.btn_search = ttk.Button(btn_search_frame, text=self._("search_btn"), command=self.perform_search)
-        self.btn_search.pack(side="left")
-        self.btn_clear_search = ttk.Button(btn_search_frame, text=self._("clear"), command=self.clear_search)
-        self.btn_clear_search.pack(side="left", padx=(6, 0))
+        entry_container = ttk.Frame(screen_row)
+        entry_container.grid(row=0, column=3, sticky="ew")
+        entry_container.columnconfigure(0, weight=1)
+        self.entry_search = ttk.Entry(entry_container, textvariable=self.search_var)
+        self.entry_search.grid(row=0, column=0, sticky="ew")
+        self.btn_search = ttk.Button(entry_container, text=self._("search_btn"), command=self.perform_search, width=10)
+        self.btn_search.grid(row=0, column=1, padx=(8, 0))
+        self.btn_clear_search = ttk.Button(entry_container, text=self._("clear"), command=self.clear_search, width=8)
+        self.btn_clear_search.grid(row=0, column=2, padx=(6, 0))
+
         row_index += 1
 
-        self.time_row = ttk.Frame(self.frm_filters)
-        self.time_row.grid(row=row_index, column=0, columnspan=2, sticky="ew", pady=(6, 2))
-        self.time_row.columnconfigure(1, weight=1)
+        toggle_row = ttk.Frame(self.frm_filters)
+        toggle_row.grid(row=row_index, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        toggle_row.columnconfigure(0, weight=1)
+        toggle_row.columnconfigure(1, weight=1)
+        toggle_row.columnconfigure(2, weight=1)
+
+        self.time_row = ttk.Frame(toggle_row)
+        self.time_row.grid(row=0, column=0, sticky="w", padx=(0, 8))
         self.lbl_time_display = ttk.Label(self.time_row, text=self._("time_display"))
-        self.lbl_time_display.grid(row=0, column=0, sticky="nw", padx=(0, 6))
+        self.lbl_time_display.grid(row=0, column=0, sticky="w", padx=(0, 6))
         time_options = ttk.Frame(self.time_row)
-        time_options.grid(row=0, column=1, sticky="nw", padx=(0, 8))
+        time_options.grid(row=0, column=1, sticky="w")
         self.time_format_var = tk.StringVar(value="full")
         self.rb_time_full = ttk.Radiobutton(time_options, text=self._("time_format_full"), variable=self.time_format_var, value="full", command=self.refresh_table)
-        self.rb_time_full.grid(row=0, column=0, sticky="w")
+        self.rb_time_full.pack(side="left", padx=(0, 8))
         self.rb_time_time = ttk.Radiobutton(time_options, text=self._("time_format_time"), variable=self.time_format_var, value="time", command=self.refresh_table)
-        self.rb_time_time.grid(row=1, column=0, sticky="w", pady=(2, 0))
-        row_index += 1
+        self.rb_time_time.pack(side="left")
 
         self.show_params_var = tk.BooleanVar(value=False)
-        self.param_row = ttk.Frame(self.frm_filters)
-        self.param_row.grid(row=row_index, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        self.param_row.columnconfigure(1, weight=1)
+        self.param_row = ttk.Frame(toggle_row)
+        self.param_row.grid(row=0, column=1, sticky="w", padx=(0, 8))
         self.lbl_param_display = ttk.Label(self.param_row, text=self._("param_display"))
-        self.lbl_param_display.grid(row=0, column=0, sticky="nw", padx=(0, 6))
+        self.lbl_param_display.grid(row=0, column=0, sticky="w", padx=(0, 6))
         self.chk_params = ttk.Checkbutton(self.param_row, variable=self.show_params_var, command=self.on_toggle_params)
         self.chk_params.grid(row=0, column=1, sticky="w")
         self._update_param_check_text()
 
         self.important_only_var = tk.BooleanVar(value=False)
-        self.important_row = ttk.Frame(self.frm_filters)
-        self.important_row.grid(row=row_index + 1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        self.important_row.columnconfigure(1, weight=1)
+        self.important_row = ttk.Frame(toggle_row)
+        self.important_row.grid(row=0, column=2, sticky="w")
         self.lbl_important = ttk.Label(self.important_row, text=self._("important_only"))
-        self.lbl_important.grid(row=0, column=0, sticky="nw", padx=(0, 6))
+        self.lbl_important.grid(row=0, column=0, sticky="w", padx=(0, 6))
         self.chk_important = ttk.Checkbutton(self.important_row, variable=self.important_only_var, command=self.on_toggle_important)
         self.chk_important.grid(row=0, column=1, sticky="w")
-        row_index += 2
 
         # ----- Content panel -----
         self.file_path_var = tk.StringVar(value=self._("no_file"))
-        self.summary_var = tk.StringVar(value=self._("msg.no_results"))
+        self.summary_var = tk.StringVar(value="")
         self._refresh_file_label()
         self._recent_logs: list[dict[str, object]] = []
 
@@ -558,19 +568,14 @@ class LogViewerApp:
         self._log_truncated_error = False
 
         header = ttk.Frame(content_side)
-        header.grid(row=0, column=0, sticky="ew")
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 4))
         header.columnconfigure(1, weight=1)
         self.lbl_file_caption = ttk.Label(header, text=self._("file_label"))
         self.lbl_file_caption.grid(row=0, column=0, sticky="w")
-        self.lbl_file_path = ttk.Label(header, textvariable=self.file_path_var, wraplength=480, justify="left")
+        self.lbl_file_path = ttk.Label(header, textvariable=self.file_path_var, wraplength=360, justify="left")
         self.lbl_file_path.grid(row=0, column=1, sticky="w", padx=(6, 0))
-        self.btn_bar = ttk.Frame(header)
-        self.btn_bar.grid(row=0, column=2, sticky="e")
-        self.btn_saved_logs = ttk.Button(self.btn_bar, text=self._("view_saved_logs"), command=self.show_saved_logs, state="disabled")
-        self.btn_save_log = ttk.Button(self.btn_bar, text=self._("save_log"), command=self.save_selected_logs, state="disabled")
-        self.btn_open_folder = ttk.Button(self.btn_bar, text=self._("open_folder"), command=self.open_current_folder)
-        self.lbl_summary = ttk.Label(header, textvariable=self.summary_var, anchor="w")
-        self.lbl_summary.grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        self.lbl_summary = ttk.Label(header, textvariable=self.summary_var, anchor="e")
+        self.lbl_summary.grid(row=0, column=2, sticky="e", padx=(6, 0))
 
         ttk.Separator(content_side).grid(row=1, column=0, sticky="ew", pady=(8, 8))
 
@@ -626,7 +631,6 @@ class LogViewerApp:
         self.entry_search.bind("<Return>", lambda _e: self.perform_search())
         self.root.bind_all("<Control-f>", self.focus_search_entry)
         self.tree.bind("<Double-1>", self.on_double_click)
-        self._show_sql_actions()
         self._update_action_buttons()
 
         # Global copy: Ctrl+C copies selected rows, or all rows if none selected.
@@ -1036,12 +1040,10 @@ class LogViewerApp:
             self.sql_command_row.grid()
             self.param_row.grid()
             self.important_row.grid()
-            self._show_sql_actions()
         else:
             self.sql_command_row.grid_remove()
             self.param_row.grid_remove()
             self.important_row.grid_remove()
-            self._hide_sql_actions()
             if self.show_params_var.get():
                 self.show_params_var.set(False)
                 self._update_param_check_text()
@@ -1267,7 +1269,7 @@ class LogViewerApp:
 
     def _update_summary_label(self) -> None:
         if not getattr(self, "current_file", None):
-            self.summary_var.set(self._("msg_choose_prompt"))
+            self.summary_var.set("")
             return
         total = self._total_count
         visible = self._visible_count
@@ -1300,22 +1302,6 @@ class LogViewerApp:
             self.chk_params.configure(text=text)
         except tk.TclError:
             pass
-
-    def _show_sql_actions(self) -> None:
-        if hasattr(self, "btn_open_folder"):
-            self.btn_open_folder.pack_forget()
-            self.btn_save_log.pack_forget()
-            self.btn_saved_logs.pack_forget()
-            self.btn_saved_logs.pack(side="right")
-            self.btn_save_log.pack(side="right", padx=(6, 0))
-            self.btn_open_folder.pack(side="right", padx=(6, 0))
-
-    def _hide_sql_actions(self) -> None:
-        if hasattr(self, "btn_save_log"):
-            self.btn_save_log.pack_forget()
-            self.btn_saved_logs.pack_forget()
-            if not self.btn_open_folder.winfo_manager():
-                self.btn_open_folder.pack(side="right", padx=(6, 0))
 
     def _update_action_buttons(self) -> None:
         if not hasattr(self, "btn_save_log"):

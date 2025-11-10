@@ -3,7 +3,7 @@
 """
 ToolONWA VIP v1.0 - main
 """
-import os, re, sys, json, threading, logging
+import os, re, sys, json, threading, logging, subprocess
 import datetime as dt
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -16,7 +16,7 @@ from screen.DB import insert as insert_screen
 from screen.DB import update as update_screen
 from screen.DB import backup as backup_screen
 from screen.MU import log_viewer as log_viewer
-from screen.General import history_window, rdsinfo
+from screen.General import history_window, rdsinfo, data_compare
 from core import i18n
 
 APP_TITLE = "ToolONWA VIP v1.0"
@@ -49,6 +49,14 @@ CONFIG_PATH = os.path.join(CONFIGS_DIR, "config.json")
 DB_LIST_PATH = os.path.join(CONFIGS_DIR, "db_list.json")
 LOG_DIR = os.path.join(PERSIST_DIR, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
+
+DEFAULT_CONFIG = {
+    "lang": i18n.LANG_VI,
+    "ora_path": DEFAULT_ORA_PATH,
+    "last_alias": None,
+    "use_host_port": False,
+    "ttl_files": [],
+}
 
 LOGGER = logging.getLogger("ToolVIP")
 
@@ -117,25 +125,53 @@ def save_config(cfg):
 
 def load_config():
     ensure_configs_dir()
-    if not os.path.isfile(CONFIG_PATH):
-        cfg = {"lang":"VN","ora_path":DEFAULT_ORA_PATH,"last_alias":None,"use_host_port":False}
+    cfg = dict(DEFAULT_CONFIG)
+    dirty = False
+    if os.path.isfile(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                cfg.update(data)
+        except Exception as exc:
+            LOGGER.exception("Failed to load config %s", CONFIG_PATH, exc_info=exc)
+    else:
+        dirty = True
+
+    lang = str(cfg.get("lang", i18n.LANG_VI)).upper()
+    if lang in ("VI", "VN"):
+        normalized_lang = i18n.LANG_VI
+    elif lang in ("JA", "JP"):
+        normalized_lang = i18n.LANG_JP
+    else:
+        normalized_lang = i18n.LANG_VI
+    if cfg.get("lang") != normalized_lang:
+        cfg["lang"] = normalized_lang
+        dirty = True
+
+    ttl_entries = cfg.get("ttl_files", [])
+    normalized_ttl: list[dict[str, str | None]] = []
+    if isinstance(ttl_entries, list):
+        for entry in ttl_entries:
+            if isinstance(entry, str):
+                normalized_ttl.append({"path": entry, "last_used": None})
+            elif isinstance(entry, dict):
+                path_val = entry.get("path")
+                if not path_val:
+                    continue
+                normalized_ttl.append({"path": str(path_val), "last_used": entry.get("last_used")})
+    if cfg.get("ttl_files") != normalized_ttl:
+        cfg["ttl_files"] = normalized_ttl
+        dirty = True
+
+    ora_path = cfg.get("ora_path") or DEFAULT_ORA_PATH
+    if not os.path.isfile(ora_path) and os.path.isfile(DEFAULT_ORA_PATH):
+        cfg["ora_path"] = DEFAULT_ORA_PATH
+        dirty = True
+
+    if dirty:
         save_config(cfg)
-                # fallback if saved ora_path missing
-        if not os.path.isfile(cfg.get("ora_path","")):
-            cfg["ora_path"] = DEFAULT_ORA_PATH; save_config(cfg)
-        return cfg
-    try:
-        with open(CONFIG_PATH,"r",encoding="utf-8") as f:
-            cfg=json.load(f)
-            if cfg.get("lang") in ("vi","ja"):
-                cfg["lang"]="VN" if cfg["lang"]=="vi" else "JP"
-                    # fallback if saved ora_path missing
-        if not os.path.isfile(cfg.get("ora_path","")):
-            cfg["ora_path"] = DEFAULT_ORA_PATH; save_config(cfg)
-        return cfg
-    except Exception as exc:
-        LOGGER.exception("Failed to load config %s", CONFIG_PATH)
-        return {"lang":"VN","ora_path":DEFAULT_ORA_PATH,"last_alias":None,"use_host_port":False}
+    return cfg
 
 def ensure_db_list_file():
     ensure_configs_dir()
@@ -188,6 +224,14 @@ class ToolVIP(tk.Tk):
         self._status_custom = False
         self.conn_blocks = {}
         self._history_window = None
+        self.ttl_files: list[dict[str, str | None]] = list(self.config.get("ttl_files", []))
+        self._ttl_window: tk.Toplevel | None = None
+        self._ttl_tree: ttk.Treeview | None = None
+        self._ttl_tree_rows: dict[str, str] = {}
+        self._ttl_btn_run = None
+        self._ttl_btn_add = None
+        self._ttl_btn_remove = None
+        self._ttl_btn_close = None
 
         self._setup_fonts()
         self._build_ui()
@@ -297,15 +341,20 @@ class ToolVIP(tk.Tk):
         self.btn_backup.grid(row=0, column=2, sticky="ew", padx=4, pady=4)
         self.btn_sqlplus = ttk.Button(self.frm_action, command=self._run_cmd_sqlplus)
         self.btn_sqlplus.grid(row=1, column=0, sticky="ew", padx=4, pady=4)
-        self.btn_compare = ttk.Button(self.frm_action, command=self._coming_soon)
+        self.btn_compare = ttk.Button(self.frm_action, command=self._open_data_compare)
         self.btn_compare.grid(row=1, column=1, sticky="ew", padx=4, pady=4)
         self.btn_edit_conn = ttk.Button(self.frm_action, command=self._edit_connection)
         self.btn_edit_conn.grid(row=1, column=2, sticky="ew", padx=4, pady=4)
 
         self.frm_mu = ttk.LabelFrame(root, padding=(8, 6), relief="ridge", borderwidth=2)
         self.frm_mu.grid(row=1, column=0, sticky="ew", padx=2, pady=(0, 8))
+        self.frm_mu.columnconfigure(2, weight=1)
         self.btn_log_mu = ttk.Button(self.frm_mu, command=self._open_log_view_mu)
         self.btn_log_mu.grid(row=0, column=0, padx=4, pady=4, sticky="w")
+        self.btn_run_ttl = ttk.Button(self.frm_mu, command=self._on_ttl_button_click)
+        self.btn_run_ttl.grid(row=0, column=1, padx=4, pady=4, sticky="w")
+        self.ttl_menu = tk.Menu(self, tearoff=0)
+        self._refresh_ttl_menu()
 
         self.frm_common = ttk.LabelFrame(root, padding=(8, 6), relief="ridge", borderwidth=2)
         self.frm_common.grid(row=2, column=0, sticky="ew", padx=2, pady=(0, 8))
@@ -385,6 +434,9 @@ class ToolVIP(tk.Tk):
 
         self.frm_mu.config(text=self._t("main.section.mu"))
         self.btn_log_mu.config(text=self._t("main.btn.read_log_mu"))
+        self.btn_run_ttl.config(text=self._t("main.btn.run_ttl"))
+        self._refresh_ttl_menu()
+        self._apply_ttl_window_language()
 
         self.frm_common.config(text=self._t("main.section.common"))
         self.btn_rds.config(text=self._t("main.btn.rds_info"))
@@ -435,20 +487,36 @@ class ToolVIP(tk.Tk):
 
 
     def _load_ora(self, path):
-        if not os.path.isfile(path):
+        target = path
+        if not os.path.isfile(target):
             if os.path.isfile(DEFAULT_ORA_PATH):
-                path = DEFAULT_ORA_PATH
-                self.current_ora_path = path
-                self.config["ora_path"] = path
+                target = DEFAULT_ORA_PATH
+                self.current_ora_path = target
+                self.config["ora_path"] = target
                 save_config(self.config)
             else:
                 return
+        else:
+            self.current_ora_path = target
         try:
-            with open(path,"r",encoding="utf-8",errors="ignore") as f: text=f.read()
+            with open(target,"r",encoding="utf-8",errors="ignore") as f: text=f.read()
             self.conn_blocks=parse_tnsnames_blocks(text)
+            self._apply_tns_admin_env(target)
         except Exception as exc:
-            self._log_exception(f"Failed to load tnsnames file: {path}")
+            self._log_exception(f"Failed to load tnsnames file: {target}")
             messagebox.showerror(APP_TITLE, self._t("main.msg.load_tns_error", error=str(exc)))
+
+    def _apply_tns_admin_env(self, path: str) -> None:
+        """Ensure python-oracledb finds the selected tnsnames.ora on every machine."""
+        try:
+            directory = os.path.dirname(os.path.abspath(path))
+        except Exception:
+            return
+        if not directory or not os.path.isdir(directory):
+            return
+        os.environ["TNS_ADMIN"] = directory
+        os.environ["TOOLVIP_TNS_DIR"] = directory
+        self._logger.debug("Using TNS network configuration from %s", directory)
 
     def _load_combobox_from_json(self):
         ensure_configs_dir()
@@ -464,6 +532,267 @@ class ToolVIP(tk.Tk):
             self.cbo_conn.set(items[0]); self._on_pick_connection()
         else:
             self._set_status("main.msg.no_config_items", ok=False)
+
+    # ---------- TTL helpers ----------
+    def _on_ttl_button_click(self):
+        if not self.ttl_files:
+            self._prompt_add_ttl_files(open_manager_after=True)
+            return
+        self._refresh_ttl_menu()
+        try:
+            x = self.btn_run_ttl.winfo_rootx()
+            y = self.btn_run_ttl.winfo_rooty() + self.btn_run_ttl.winfo_height()
+            self.ttl_menu.tk_popup(x, y)
+        finally:
+            self.ttl_menu.grab_release()
+
+    def _prompt_add_ttl_files(self, *, open_manager_after: bool = False) -> None:
+        initial_dir = ""
+        if self.ttl_files:
+            first_path = self.ttl_files[0].get("path") if isinstance(self.ttl_files[0], dict) else None
+            if first_path:
+                initial_dir = os.path.dirname(first_path)
+        if not initial_dir or not os.path.isdir(initial_dir):
+            initial_dir = os.path.expanduser("~")
+        paths = filedialog.askopenfilenames(
+            parent=self,
+            title=self._t("main.ttl.dialog.title"),
+            filetypes=[("TTL files", "*.ttl"), ("All files", "*.*")],
+            initialdir=initial_dir,
+        )
+        if not paths:
+            if not self.ttl_files:
+                messagebox.showinfo(APP_TITLE, self._t("main.ttl.msg.add_none"), parent=self)
+            return
+        added: list[str] = []
+        existing: set[str] = set()
+        for entry in self.ttl_files:
+            if not isinstance(entry, dict):
+                continue
+            entry_path = entry.get("path")
+            if not entry_path:
+                continue
+            existing.add(os.path.normcase(os.path.abspath(entry_path)))
+        for raw in paths:
+            normalized = os.path.abspath(os.path.normpath(raw))
+            if not normalized.lower().endswith(".ttl"):
+                continue
+            if not os.path.isfile(normalized):
+                continue
+            key = os.path.normcase(normalized)
+            if key in existing:
+                continue
+            self.ttl_files.append({"path": normalized, "last_used": None})
+            existing.add(key)
+            added.append(normalized)
+        if not added:
+            if not self.ttl_files:
+                messagebox.showinfo(APP_TITLE, self._t("main.ttl.msg.add_none"), parent=self)
+            return
+        self._persist_ttl_entries()
+        highlight = added[-1]
+        if open_manager_after:
+            self._open_ttl_manager(highlight=highlight)
+        else:
+            self._refresh_ttl_window(highlight=highlight)
+
+    def _refresh_ttl_menu(self):
+        if not getattr(self, "ttl_menu", None):
+            return
+        self.ttl_menu.delete(0, "end")
+        if not self.ttl_files:
+            self.ttl_menu.add_command(label=self._t("main.ttl.menu.empty"), state="disabled")
+        else:
+            for entry in self.ttl_files:
+                path = entry.get("path") if isinstance(entry, dict) else None
+                if not path:
+                    continue
+                label = os.path.basename(path) or path
+                if not os.path.isfile(path):
+                    label = f"{label}{self._t('main.ttl.menu.missing_suffix')}"
+                self.ttl_menu.add_command(label=label, command=lambda p=path: self._run_ttl_file(p))
+            self.ttl_menu.add_separator()
+        self.ttl_menu.add_command(
+            label=self._t("main.ttl.menu.add"),
+            command=lambda: self._prompt_add_ttl_files(open_manager_after=not (self._ttl_window and self._ttl_window.winfo_exists())),
+        )
+        self.ttl_menu.add_command(label=self._t("main.ttl.menu.manage"), command=self._open_ttl_manager)
+
+    def _open_ttl_manager(self, highlight: str | None = None):
+        if self._ttl_window and self._ttl_window.winfo_exists():
+            self._ttl_window.lift()
+            if highlight:
+                self._highlight_ttl_entry(highlight)
+            return
+        win = tk.Toplevel(self)
+        self._ttl_window = win
+        win.title(self._t("main.ttl.dialog.title"))
+        win.geometry("720x420")
+        win.resizable(True, True)
+        try:
+            if os.path.isfile(ICON_PATH):
+                win.iconbitmap(ICON_PATH)
+        except Exception:
+            pass
+        win.transient(self)
+        frame = ttk.Frame(win, padding=10)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+        columns = ("name", "path")
+        tree = ttk.Treeview(frame, columns=columns, show="headings", height=10)
+        self._ttl_tree = tree
+        tree.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        scroll_y = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        scroll_y.grid(row=0, column=2, sticky="ns")
+        tree.configure(yscrollcommand=scroll_y.set)
+        btn_bar = ttk.Frame(frame)
+        btn_bar.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        btn_bar.columnconfigure(2, weight=1)
+        self._ttl_btn_run = ttk.Button(btn_bar, command=self._run_selected_ttl_from_window)
+        self._ttl_btn_run.grid(row=0, column=0, padx=(0, 6))
+        self._ttl_btn_add = ttk.Button(btn_bar, command=lambda: self._prompt_add_ttl_files(open_manager_after=False))
+        self._ttl_btn_add.grid(row=0, column=1, padx=(0, 6))
+        self._ttl_btn_remove = ttk.Button(btn_bar, command=self._remove_selected_ttl)
+        self._ttl_btn_remove.grid(row=0, column=2, padx=(0, 6), sticky="w")
+        self._ttl_btn_close = ttk.Button(btn_bar, command=self._close_ttl_manager)
+        self._ttl_btn_close.grid(row=0, column=3, sticky="e")
+        win.protocol("WM_DELETE_WINDOW", self._close_ttl_manager)
+        self._apply_ttl_window_language()
+        self._refresh_ttl_window(highlight=highlight)
+
+    def _close_ttl_manager(self):
+        if self._ttl_window and self._ttl_window.winfo_exists():
+            try:
+                self._ttl_window.destroy()
+            except Exception:
+                pass
+        self._ttl_window = None
+        self._ttl_tree = None
+        self._ttl_tree_rows = {}
+        self._ttl_btn_run = self._ttl_btn_add = self._ttl_btn_remove = self._ttl_btn_close = None
+
+    def _refresh_ttl_window(self, highlight: str | None = None):
+        if not self._ttl_tree:
+            return
+        tree = self._ttl_tree
+        for item in tree.get_children():
+            tree.delete(item)
+        self._ttl_tree_rows = {}
+        for idx, entry in enumerate(self.ttl_files):
+            path = entry.get("path") if isinstance(entry, dict) else ""
+            iid = f"ttl_{idx}"
+            self._ttl_tree_rows[iid] = path
+            tree.insert(
+                "",
+                "end",
+                iid=iid,
+                values=(os.path.basename(path) or path, path),
+            )
+        self._apply_ttl_window_language()
+        if highlight:
+            self._highlight_ttl_entry(highlight)
+
+    def _apply_ttl_window_language(self):
+        if not self._ttl_tree:
+            return
+        headings = {
+            "name": self._t("main.ttl.column.name"),
+            "path": self._t("main.ttl.column.path"),
+        }
+        for column_id, text in headings.items():
+            self._ttl_tree.heading(column_id, text=text)
+        if self._ttl_btn_run:
+            self._ttl_btn_run.configure(text=self._t("main.ttl.btn.run"))
+        if self._ttl_btn_add:
+            self._ttl_btn_add.configure(text=self._t("main.ttl.btn.add"))
+        if self._ttl_btn_remove:
+            self._ttl_btn_remove.configure(text=self._t("main.ttl.btn.remove"))
+        if self._ttl_btn_close:
+            self._ttl_btn_close.configure(text=self._t("main.ttl.btn.close"))
+
+    def _highlight_ttl_entry(self, path: str):
+        if not self._ttl_tree or not path:
+            return
+        target = os.path.normcase(os.path.abspath(path))
+        for iid, stored_path in self._ttl_tree_rows.items():
+            if os.path.normcase(os.path.abspath(stored_path or "")) == target:
+                self._ttl_tree.selection_set(iid)
+                self._ttl_tree.see(iid)
+                break
+
+    def _remove_selected_ttl(self):
+        if not self._ttl_tree:
+            return
+        selection = self._ttl_tree.selection()
+        if not selection:
+            messagebox.showinfo(APP_TITLE, self._t("main.ttl.msg.no_selection"), parent=self._ttl_window or self)
+            return
+        remove_keys: set[str] = set()
+        for item in selection:
+            stored_path = self._ttl_tree_rows.get(item)
+            if not stored_path:
+                continue
+            remove_keys.add(os.path.normcase(os.path.abspath(stored_path)))
+        if not remove_keys:
+            return
+        cleaned: list[dict[str, str | None]] = []
+        for entry in self.ttl_files:
+            entry_path = entry.get("path") if isinstance(entry, dict) else None
+            if entry_path and os.path.normcase(os.path.abspath(entry_path)) in remove_keys:
+                continue
+            cleaned.append(entry)
+        self.ttl_files = cleaned
+        self._persist_ttl_entries()
+
+    def _run_selected_ttl_from_window(self):
+        if not self._ttl_tree:
+            return
+        selection = self._ttl_tree.selection()
+        if not selection:
+            messagebox.showinfo(APP_TITLE, self._t("main.ttl.msg.no_selection"), parent=self._ttl_window or self)
+            return
+        path = self._ttl_tree_rows.get(selection[0])
+        if path:
+            self._run_ttl_file(path)
+
+    def _run_ttl_file(self, path: str):
+        normalized = os.path.abspath(path)
+        if not os.path.isfile(normalized):
+            messagebox.showerror(APP_TITLE, self._t("main.ttl.msg.not_found", path=normalized), parent=self._ttl_window or self)
+            return
+        try:
+            if sys.platform.startswith("win") and hasattr(os, "startfile"):
+                os.startfile(normalized)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", normalized], shell=False)
+            else:
+                subprocess.Popen(["xdg-open", normalized], shell=False)
+        except Exception as exc:
+            self._logger.exception("Failed to open TTL file %s", normalized, exc_info=exc)
+            messagebox.showerror(APP_TITLE, self._t("main.ttl.msg.open_error", error=str(exc)), parent=self._ttl_window or self)
+            return
+        self._update_ttl_last_used(normalized)
+
+    def _update_ttl_last_used(self, path: str):
+        norm = os.path.normcase(os.path.abspath(path))
+        for idx, entry in enumerate(self.ttl_files):
+            entry_path = entry.get("path") if isinstance(entry, dict) else None
+            if not entry_path:
+                continue
+            entry_norm = os.path.normcase(os.path.abspath(entry_path))
+            if entry_norm == norm:
+                entry["last_used"] = dt.datetime.now().isoformat(timespec="seconds")
+                updated = self.ttl_files.pop(idx)
+                self.ttl_files.insert(0, updated)
+                break
+        self._persist_ttl_entries()
+
+    def _persist_ttl_entries(self):
+        self.config["ttl_files"] = self.ttl_files
+        save_config(self.config)
+        self._refresh_ttl_menu()
+        self._refresh_ttl_window()
 
     def _parse_display_item(self, disp: str):
         s = disp.strip()
@@ -828,6 +1157,13 @@ class ToolVIP(tk.Tk):
         except Exception as exc:
             self._logger.exception("Failed to open MU log viewer")
             messagebox.showerror(APP_TITLE, self._t("main.msg.log_viewer_error", error=str(exc)))
+
+    def _open_data_compare(self):
+        try:
+            data_compare.open_compare_window(self, ICON_PATH)
+        except Exception as exc:
+            self._logger.exception("Failed to open data compare window")
+            messagebox.showerror(APP_TITLE, self._t("main.msg.generic_error", error=str(exc)))
 
 def main(): app=ToolVIP(); app.mainloop()
 if __name__=="__main__": main()
