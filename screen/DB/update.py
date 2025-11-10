@@ -7,7 +7,7 @@ import logging
 import re
 import threading
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, font as tkfont
 from tkinter.scrolledtext import ScrolledText
 from typing import Any, Dict, List, Optional
 
@@ -27,6 +27,7 @@ def get_logger() -> logging.Logger:
 
 
 class UpdateWindow(tk.Toplevel):
+    GRID_SECTION_RATIO = 0.35
     def __init__(self, parent: tk.Widget, connection: Dict[str, str]):
         """Khởi tạo cửa sổ Update với dữ liệu kết nối đã chọn."""
         super().__init__(parent)
@@ -63,6 +64,7 @@ class UpdateWindow(tk.Toplevel):
         i18n.add_listener(self._lang_listener)
         self._apply_language()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.after(250, self._apply_initial_split)
         self.after(100, self._connect_async)
 
     def _log_exception(self, message: str, exc: Exception) -> None:
@@ -95,10 +97,15 @@ class UpdateWindow(tk.Toplevel):
         grid_section = ttk.Frame(self.content_pane)
         grid_section.columnconfigure(0, weight=1)
         grid_section.rowconfigure(0, weight=1)
-        self.content_pane.add(grid_section, weight=3)
+        self.content_pane.add(grid_section, weight=1)
+        try:
+            self.content_pane.pane(grid_section, weight=1, minsize=150)
+        except tk.TclError:
+            pass
 
         self.grid = DataGrid(grid_section)
         self.grid.grid(row=0, column=0, sticky="nsew")
+        self._style_data_grid(self.grid.tree, "Update.Treeview")
 
         self.btn_bar = ttk.Frame(grid_section)
         self.btn_bar.grid(row=1, column=0, sticky="e", pady=(6, 0))
@@ -112,7 +119,11 @@ class UpdateWindow(tk.Toplevel):
         detail_section = ttk.Frame(self.content_pane)
         detail_section.columnconfigure(0, weight=1)
         detail_section.rowconfigure(1, weight=1)
-        self.content_pane.add(detail_section, weight=1)
+        self.content_pane.add(detail_section, weight=4)
+        try:
+            self.content_pane.pane(detail_section, weight=4, minsize=260)
+        except tk.TclError:
+            pass
 
         self.frm_condition = ttk.LabelFrame(
             detail_section,
@@ -133,8 +144,37 @@ class UpdateWindow(tk.Toplevel):
         self.frm_sql.rowconfigure(0, weight=1)
         self.frm_sql.columnconfigure(0, weight=1)
 
-        self.txt_sql = ScrolledText(self.frm_sql, height=6, wrap="word")
+        self.txt_sql = ScrolledText(self.frm_sql, height=6, wrap="none")
         self.txt_sql.grid(row=0, column=0, sticky="nsew")
+        self.sql_scroll_x = ttk.Scrollbar(self.frm_sql, orient="horizontal", command=self.txt_sql.xview)
+        self.sql_scroll_x.grid(row=1, column=0, sticky="ew")
+        self.txt_sql.configure(xscrollcommand=self.sql_scroll_x.set)
+
+    def _style_data_grid(self, tree: ttk.Treeview, style_name: str):
+        style = ttk.Style(tree)
+        base_font = tkfont.nametofont("TkDefaultFont").copy()
+        base_font.configure(size=8)
+        try:
+            heading_font = tkfont.nametofont("TkHeadingFont").copy()
+        except tk.TclError:
+            heading_font = base_font
+        style.configure(style_name, font=base_font, rowheight=20)
+        style.configure(f"{style_name}.Heading", font=heading_font)
+        tree.configure(style=style_name)
+
+    def _apply_initial_split(self):
+        try:
+            total = self.content_pane.winfo_height()
+        except tk.TclError:
+            return
+        if total <= 1:
+            self.after(200, self._apply_initial_split)
+            return
+        target = max(170, int(total * self.GRID_SECTION_RATIO))
+        try:
+            self.content_pane.sashpos(0, target)
+        except tk.TclError:
+            pass
 
     def _build_search(self, parent: ttk.Frame):
         """Tạo khu vực tìm kiếm danh sách bảng."""
@@ -150,10 +190,10 @@ class UpdateWindow(tk.Toplevel):
         self.ent_search.grid(row=1, column=0, sticky="ew", pady=4)
         self.ent_search.bind("<KeyRelease>", lambda _event: self._filter_tables())
 
-        self.list_tables = tk.Listbox(self.grp_search, height=8)
+        self.list_tables = tk.Listbox(self.grp_search, height=4)
         self.list_tables.grid(row=2, column=0, sticky="nsew", pady=(0, 4))
         self.list_tables.bind("<<ListboxSelect>>", lambda _event: self._on_select_table())
-        self.grp_search.rowconfigure(2, weight=1)
+        self.grp_search.rowconfigure(2, weight=0)
 
     def _build_actions(self, parent: ttk.Frame):
         """Khoi tao cac nut thao tac chinh."""
@@ -468,7 +508,7 @@ class UpdateWindow(tk.Toplevel):
                 literal = db_utils.format_sql_literal(row.get(pk), meta)
                 where_parts.append(f"{pk} = {literal}")
             extra = self._render_condition(condition_template, row)
-            sql = f"UPDATE {owner}.{table_name} SET " + ", ".join(set_parts)
+            sql = f"UPDATE {table_name} SET " + ", ".join(set_parts)
             if where_parts:
                 sql += " WHERE " + " AND ".join(where_parts)
                 if extra:
@@ -591,7 +631,7 @@ class UpdateWindow(tk.Toplevel):
                     binds[f"PK_{pk}"] = self._convert_value(value, self._column_meta.get(pk))
                     where_parts.append(f"{pk} = :PK_{pk}")
                 extra = self._render_condition(condition_template, row)
-                sql = f"UPDATE {owner}.{table_name} SET {set_clause}"
+                sql = f"UPDATE {table_name} SET {set_clause}"
                 if where_parts:
                     sql += " WHERE " + " AND ".join(where_parts)
                     if extra:

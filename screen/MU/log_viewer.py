@@ -467,9 +467,11 @@ class LogViewerApp:
 
         log_command_row = ttk.Frame(self.frm_filters)
         log_command_row.grid(row=row_index, column=0, columnspan=3, sticky="ew", pady=(0, 4))
+        log_command_row.columnconfigure(0, weight=0)
+        log_command_row.columnconfigure(1, weight=1)
         self.log_type_var = tk.StringVar(value="SQL")
         log_group = ttk.Frame(log_command_row)
-        log_group.pack(side="left")
+        log_group.grid(row=0, column=0, sticky="w")
         self.lbl_log_type = ttk.Label(log_group, text=self._("log_type"))
         self.lbl_log_type.pack(side="left", padx=(0, 6))
         self.rb_sql = ttk.Radiobutton(log_group, text=self._("sql"), variable=self.log_type_var, value="SQL", command=self.update_filters)
@@ -478,7 +480,8 @@ class LogViewerApp:
         self.rb_error.pack(side="left", padx=(12, 0))
 
         command_group = ttk.Frame(log_command_row)
-        command_group.pack(side="left", padx=24)
+        command_group.grid(row=0, column=1, sticky="w", padx=(24, 0))
+        self.sql_command_row = command_group
         self.lbl_cmd = ttk.Label(command_group, text=self._("command_type"))
         self.lbl_cmd.pack(side="left", padx=(0, 6))
         self.sql_command_var = tk.StringVar(value="ALL")

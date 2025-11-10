@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import threading
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, font as tkfont
 from tkinter.scrolledtext import ScrolledText
 from typing import Any, Dict, List, Optional
 
@@ -26,6 +26,7 @@ def get_logger() -> logging.Logger:
 
 
 class InsertWindow(tk.Toplevel):
+    GRID_SECTION_RATIO = 0.35
     def __init__(self, parent: tk.Widget, connection: Dict[str, str]):
         """Khởi tạo cửa sổ Insert với thông tin kết nối đã chọn."""
         super().__init__(parent)
@@ -62,6 +63,7 @@ class InsertWindow(tk.Toplevel):
         i18n.add_listener(self._lang_listener)
         self._apply_language()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.after(250, self._apply_initial_split)
         self.after(100, self._connect_async)
 
     def _log_exception(self, message: str, exc: Exception) -> None:
@@ -91,10 +93,15 @@ class InsertWindow(tk.Toplevel):
         grid_section = ttk.Frame(self.content_pane)
         grid_section.columnconfigure(0, weight=1)
         grid_section.rowconfigure(0, weight=1)
-        self.content_pane.add(grid_section, weight=3)
+        self.content_pane.add(grid_section, weight=1)
+        try:
+            self.content_pane.pane(grid_section, weight=1, minsize=140)
+        except tk.TclError:
+            pass
 
         self.grid = DataGrid(grid_section)
         self.grid.grid(row=0, column=0, sticky="nsew")
+        self._style_data_grid(self.grid.tree, "Insert.Treeview")
 
         self.btn_bar = ttk.Frame(grid_section)
         self.btn_bar.grid(row=1, column=0, sticky="e", pady=(6, 0))
@@ -108,7 +115,11 @@ class InsertWindow(tk.Toplevel):
         sql_section = ttk.Frame(self.content_pane)
         sql_section.columnconfigure(0, weight=1)
         sql_section.rowconfigure(0, weight=1)
-        self.content_pane.add(sql_section, weight=1)
+        self.content_pane.add(sql_section, weight=4)
+        try:
+            self.content_pane.pane(sql_section, weight=4, minsize=220)
+        except tk.TclError:
+            pass
 
         self.frm_sql = ttk.LabelFrame(
             sql_section,
@@ -119,8 +130,37 @@ class InsertWindow(tk.Toplevel):
         self.frm_sql.rowconfigure(0, weight=1)
         self.frm_sql.columnconfigure(0, weight=1)
 
-        self.txt_sql = ScrolledText(self.frm_sql, height=6, wrap="word")
+        self.txt_sql = ScrolledText(self.frm_sql, height=6, wrap="none")
         self.txt_sql.grid(row=0, column=0, sticky="nsew")
+        self.sql_scroll_x = ttk.Scrollbar(self.frm_sql, orient="horizontal", command=self.txt_sql.xview)
+        self.sql_scroll_x.grid(row=1, column=0, sticky="ew")
+        self.txt_sql.configure(xscrollcommand=self.sql_scroll_x.set)
+
+    def _style_data_grid(self, tree: ttk.Treeview, style_name: str):
+        style = ttk.Style(tree)
+        base_font = tkfont.nametofont("TkDefaultFont").copy()
+        base_font.configure(size=8)
+        try:
+            heading_font = tkfont.nametofont("TkHeadingFont").copy()
+        except tk.TclError:
+            heading_font = base_font
+        style.configure(style_name, font=base_font, rowheight=20)
+        style.configure(f"{style_name}.Heading", font=heading_font)
+        tree.configure(style=style_name)
+
+    def _apply_initial_split(self):
+        try:
+            total = self.content_pane.winfo_height()
+        except tk.TclError:
+            return
+        if total <= 1:
+            self.after(200, self._apply_initial_split)
+            return
+        target = max(160, int(total * self.GRID_SECTION_RATIO))
+        try:
+            self.content_pane.sashpos(0, target)
+        except tk.TclError:
+            pass
 
 
     def _build_search(self, parent: ttk.Frame):
@@ -135,10 +175,10 @@ class InsertWindow(tk.Toplevel):
         self.ent_search = ttk.Entry(self.grp_search, textvariable=self.var_search)
         self.ent_search.grid(row=1, column=0, sticky="ew", pady=4)
         self.ent_search.bind("<KeyRelease>", lambda _event: self._filter_tables())
-        self.list_tables = tk.Listbox(self.grp_search, height=8)
+        self.list_tables = tk.Listbox(self.grp_search, height=4)
         self.list_tables.grid(row=2, column=0, sticky="nsew", pady=(0, 4))
         self.list_tables.bind("<<ListboxSelect>>", self._on_select_table)
-        self.grp_search.rowconfigure(2, weight=1)
+        self.grp_search.rowconfigure(2, weight=0)
 
 
 
@@ -423,7 +463,6 @@ class InsertWindow(tk.Toplevel):
         if not table:
             messagebox.showwarning(self._t(APP_TITLE_KEY), self._t("insert.msg.no_table"), parent=self)
             return
-        column_list = ", ".join(self._columns)
         sql_lines: List[str] = []
         formatted_rows: List[Dict[str, str]] = []
         for row in rows:
@@ -434,7 +473,7 @@ class InsertWindow(tk.Toplevel):
                 literal = db_utils.format_sql_literal(row.get(col), meta)
                 formatted_row[col] = literal
                 values.append(literal)
-            sql_lines.append(f"INSERT INTO {table} ({column_list}) VALUES ({', '.join(values)});")
+            sql_lines.append(f"INSERT INTO {table} VALUES({', '.join(values)});")
             formatted_rows.append(row)
         sql_text = "\n".join(sql_lines)
         if sql_text:

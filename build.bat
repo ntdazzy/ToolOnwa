@@ -49,6 +49,7 @@ python -m PyInstaller main.py ^
   --hidden-import screen.General.rdsinfo ^
   --hidden-import screen.General.tailieu ^
   --hidden-import screen.MU.log_viewer ^
+  --hidden-import tksheet ^
   --hidden-import core.i18n ^
   --hidden-import core.history ^
   --hidden-import core.templates ^

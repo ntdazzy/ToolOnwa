@@ -81,6 +81,11 @@ def _ensure_excel_style(master: Optional[tk.Widget] = None) -> None:
         _excel_style_initialized = True
 
 
+def ensure_excel_style(master: Optional[tk.Widget] = None) -> None:
+    """Public helper to reuse the Excel Treeview style."""
+    _ensure_excel_style(master)
+
+
 class LoadingPopup:
     """Popup hiển thị trạng thái đang xử lý với thanh tiến trình."""
 
@@ -405,6 +410,10 @@ class EditableTreeview(ttk.Treeview):
         editor.select_range(0, tk.END)
         editor.focus()
         editor.place(x=x, y=y, width=w, height=h)
+        try:
+            editor.lift()
+        except tk.TclError:
+            pass
         editor.bind("<Return>", lambda e: self._save_editor())
         editor.bind("<Escape>", lambda e: self._close_editor())
         editor.bind("<FocusOut>", lambda e: self._save_editor())

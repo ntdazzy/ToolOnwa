@@ -381,11 +381,11 @@ def format_sql_literal(value: Any, column_meta: Optional[Dict[str, Any]] = None)
     Format python value to Oracle SQL literal based on column metadata.
     """
     if value is None:
-        return "NULL"
+        return "' '"
     if isinstance(value, str):
         v = value.strip()
         if v == "":
-            return "NULL"
+            return "' '"
         data_type = (column_meta or {}).get("data_type", "").upper()
         if data_type in NUMERIC_TYPES:
             if re.fullmatch(r"[+-]?\d+(\.\d+)?", v):

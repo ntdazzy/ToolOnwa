@@ -87,7 +87,7 @@ class BackupRestoreBase(tk.Toplevel):
         self.ent_search.grid(row=1, column=0, sticky="ew", pady=4)
         self.ent_search.bind("<KeyRelease>", lambda _event: self._filter_tables())
 
-        self.list_tables = tk.Listbox(self.grp_search, height=8)
+        self.list_tables = tk.Listbox(self.grp_search, height=5)
         self.list_tables.grid(row=2, column=0, sticky="nsew")
         self.list_tables.bind("<<ListboxSelect>>", self._handle_table_select)
         self.grp_search.rowconfigure(2, weight=1)
@@ -577,9 +577,9 @@ class RestoreFromBackupWindow(BackupRestoreBase):
     """Khôi phục dữ liệu vào bảng đích từ bảng backup đã có."""
 
     def __init__(self, parent: tk.Widget, connection: Dict[str, str]):
+        self.var_target_table = tk.StringVar()
         super().__init__(parent, connection, title_key="backup.restore_backup.title")
         self._history_action_type = "restore_backup_sql"
-        self.var_target_table = tk.StringVar()
 
     def _build_body(self, parent: ttk.Frame):
         """Xây dựng giao diện dành cho restore từ bảng backup."""
@@ -756,11 +756,16 @@ class RestoreFromCSVWindow(BackupRestoreBase):
         self._last_csv_path: Optional[str] = None
         self._history_action_type = "restore_csv"
         super().__init__(parent, connection, title_key="backup.restore_csv.title")
+        try:
+            self.list_tables.configure(height=4)
+            self.grp_search.rowconfigure(2, weight=0)
+        except Exception:
+            pass
 
     def _build_body(self, parent: ttk.Frame):
         """Xây dựng giao diện dành cho restore từ CSV."""
         parent.columnconfigure(0, weight=1)
-        parent.rowconfigure(4, weight=1)
+        parent.rowconfigure(3, weight=1)
 
         self.lbl_target = ttk.Label(parent, text=self._t("backup.label.target_table"))
         self.lbl_target.grid(row=0, column=0, sticky="w")
@@ -769,39 +774,51 @@ class RestoreFromCSVWindow(BackupRestoreBase):
 
         self.frm_actions = ttk.Frame(parent)
         self.frm_actions.grid(row=2, column=0, sticky="ew", pady=(0, 4))
-        self.frm_actions.columnconfigure(0, weight=1)
+        self.frm_actions.columnconfigure(0, weight=0)
+        self.frm_actions.columnconfigure(1, weight=1)
         self.btn_import_csv = ttk.Button(self.frm_actions, text=self._t("backup.btn.import_csv"), command=self._import_csv)
         self.btn_import_csv.grid(row=0, column=0, sticky="w")
         self.lbl_file = ttk.Label(self.frm_actions, text=self._t("backup.label.no_file"))
         self.lbl_file.grid(row=0, column=1, sticky="w", padx=(12, 0))
 
-        self.frm_preview = ttk.LabelFrame(parent, text=self._t("backup.section.preview"), padding=4)
-        self.frm_preview.grid(row=3, column=0, sticky="nsew", pady=(0, 6))
+        self.content_pane = ttk.Panedwindow(parent, orient="vertical")
+        self.content_pane.grid(row=3, column=0, sticky="nsew")
+
+        preview_container = ttk.Frame(self.content_pane)
+        preview_container.columnconfigure(0, weight=1)
+        preview_container.rowconfigure(0, weight=1)
+        self.content_pane.add(preview_container, weight=3)
+
+        self.frm_preview = ttk.LabelFrame(preview_container, text=self._t("backup.section.preview"), padding=4)
+        self.frm_preview.grid(row=0, column=0, sticky="nsew")
         self.frm_preview.columnconfigure(0, weight=1)
         self.frm_preview.rowconfigure(0, weight=1)
 
         self.preview_grid = DataGrid(self.frm_preview)
         self.preview_grid.grid(row=0, column=0, sticky="nsew")
 
-        self.frm_preview_buttons = ttk.Frame(parent)
-        self.frm_preview_buttons.grid(row=4, column=0, sticky="ew", pady=(0, 6))
+        self.frm_preview_buttons = ttk.Frame(self.frm_preview)
+        self.frm_preview_buttons.grid(row=1, column=0, sticky="ew", pady=(6, 0))
         self.frm_preview_buttons.columnconfigure(0, weight=1)
-        self.frm_preview_buttons.columnconfigure(1, weight=1)
+        self.frm_preview_buttons.columnconfigure(1, weight=0)
         self.btn_clear_preview = ttk.Button(self.frm_preview_buttons, text=self._t("backup.btn.clear_preview"), command=self._clear_preview)
-        self.btn_clear_preview.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self.btn_clear_preview.grid(row=0, column=0, sticky="w")
         self.btn_execute_restore = ttk.Button(self.frm_preview_buttons, text=self._t("backup.btn.execute_restore"), command=self._execute_restore)
-        self.btn_execute_restore.grid(row=0, column=1, sticky="ew")
+        self.btn_execute_restore.grid(row=0, column=1, sticky="e", padx=(12, 0))
 
-        self.frm_log = ttk.LabelFrame(parent, text=self._t("backup.section.log"), padding=6)
-        self.frm_log.grid(row=5, column=0, sticky="nsew")
+        log_container = ttk.Frame(self.content_pane)
+        log_container.columnconfigure(0, weight=1)
+        log_container.rowconfigure(0, weight=1)
+        self.content_pane.add(log_container, weight=2)
+
+        self.frm_log = ttk.LabelFrame(log_container, text=self._t("backup.section.log"), padding=6)
+        self.frm_log.grid(row=0, column=0, sticky="nsew")
         self.frm_log.columnconfigure(0, weight=1)
         self.frm_log.rowconfigure(0, weight=1)
 
         self.txt_log = ScrolledText(self.frm_log, height=8, wrap="word", state="normal")
         self.txt_log.grid(row=0, column=0, sticky="nsew")
 
-        parent.rowconfigure(3, weight=1)
-        parent.rowconfigure(5, weight=1)
 
     def on_metadata_loading(self, loading: bool) -> None:
         """Khóa các thao tác nhập CSV khi metadata chưa sẵn sàng."""

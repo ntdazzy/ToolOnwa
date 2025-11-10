@@ -2,3 +2,4 @@ oracledb
 cryptography
 pyinstaller
 requests
+tksheet
