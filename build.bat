@@ -26,7 +26,7 @@ if exist dist rmdir /s /q dist
 python -m PyInstaller main.py ^
   --clean ^
   --onefile ^
-  --name "ToolONWA" ^
+  --name "DatMeow" ^
   --noconsole ^
   --icon "icons\logo.ico" ^
   --add-data "core\configs;core/configs" ^
@@ -61,7 +61,7 @@ python -m PyInstaller main.py ^
 
 echo.
 echo === DONE ===
-echo File: dist\ToolONWA.exe
+echo File: dist\DatMeow.exe
 pause
 exit /b 0
 
