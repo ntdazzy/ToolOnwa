@@ -15,6 +15,7 @@ from screen.DB import db_utils
 from screen.DB import insert as insert_screen
 from screen.DB import update as update_screen
 from screen.DB import backup as backup_screen
+from screen.DB import column_control as column_control_screen
 from screen.MU import log_viewer as log_viewer
 from screen.General import history_window, rdsinfo, data_compare
 from core import i18n
@@ -348,11 +349,15 @@ class ToolVIP(tk.Tk):
 
         self.frm_mu = ttk.LabelFrame(root, padding=(8, 6), relief="ridge", borderwidth=2)
         self.frm_mu.grid(row=1, column=0, sticky="ew", padx=2, pady=(0, 8))
-        self.frm_mu.columnconfigure(2, weight=1)
+        self.frm_mu.columnconfigure(4, weight=1)
         self.btn_log_mu = ttk.Button(self.frm_mu, command=self._open_log_view_mu)
         self.btn_log_mu.grid(row=0, column=0, padx=4, pady=4, sticky="w")
         self.btn_run_ttl = ttk.Button(self.frm_mu, command=self._on_ttl_button_click)
         self.btn_run_ttl.grid(row=0, column=1, padx=4, pady=4, sticky="w")
+        self.btn_column_ctrl = ttk.Button(self.frm_mu, command=self._on_column_ctrl_button_click)
+        self.btn_column_ctrl.grid(row=0, column=2, padx=4, pady=4, sticky="w")
+        self.btn_clone_db = ttk.Button(self.frm_mu, command=self._on_clone_db_button_click)
+        self.btn_clone_db.grid(row=0, column=3, padx=4, pady=4, sticky="w")
         self.ttl_menu = tk.Menu(self, tearoff=0)
         self._refresh_ttl_menu()
 
@@ -435,6 +440,8 @@ class ToolVIP(tk.Tk):
         self.frm_mu.config(text=self._t("main.section.mu"))
         self.btn_log_mu.config(text=self._t("main.btn.read_log_mu"))
         self.btn_run_ttl.config(text=self._t("main.btn.run_ttl"))
+        self.btn_column_ctrl.config(text=self._t("main.btn.column_ctrl"))
+        self.btn_clone_db.config(text=self._t("main.btn.clone_db"))
         self._refresh_ttl_menu()
         self._apply_ttl_window_language()
 
@@ -545,6 +552,17 @@ class ToolVIP(tk.Tk):
             self.ttl_menu.tk_popup(x, y)
         finally:
             self.ttl_menu.grab_release()
+
+    # ---------- Column Control ----------
+    def _on_column_ctrl_button_click(self):
+        info = self._collect_connection_info()
+        if not info:
+            return
+        column_control_screen.open_column_control_window(self, info)
+
+    # ---------- DB Clone ----------
+    def _on_clone_db_button_click(self):
+        messagebox.showinfo(APP_TITLE, self._t("main.msg.coming_soon"))
 
     def _prompt_add_ttl_files(self, *, open_manager_after: bool = False) -> None:
         initial_dir = ""

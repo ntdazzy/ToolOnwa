@@ -1,4 +1,4 @@
-"""Quản lý ngôn ngữ tập trung cho toàn bộ ứng dụng."""
+﻿"""Quản lý ngôn ngữ tập trung cho toàn bộ ứng dụng."""
 
 from __future__ import annotations
 
@@ -65,6 +65,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "main.btn.delete_log": {LANG_VI: "Xóa log", LANG_JP: "ログ削除"},
     "main.btn.read_log_mu": {LANG_VI: "Đọc log MU", LANG_JP: "MUログ読込"},
     "main.btn.run_ttl": {LANG_VI: "Chạy TTL", LANG_JP: "TTL実行"},
+    "main.btn.column_ctrl": {LANG_VI: "Thêm/Xóa Cột", LANG_JP: "列の追加/削除"},
+    "main.btn.clone_db": {LANG_VI: "Clone DB", LANG_JP: "Clone DB"},
     "main.btn.rds_info": {LANG_VI: "Thông tin RDS", LANG_JP: "RDS情報"},
     "main.btn.docs": {LANG_VI: "Tài liệu", LANG_JP: "ドキュメント"},
     "main.btn.tips": {LANG_VI: "Bí kíp võ công", LANG_JP: "Tips"},
@@ -674,6 +676,61 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "log.detail.sql_title": {LANG_VI: "Chi tiết SQL", LANG_JP: "SQL詳細"},
     "log.detail.error_title": {LANG_VI: "Chi tiết lỗi", LANG_JP: "エラー詳細"},
     "log.detail.params_title": {LANG_VI: "Tham số", LANG_JP: "パラメータ"},
+
+    # --- Column Control ---
+    "column_ctrl.title": {LANG_VI: "Thêm/Xóa Cột cho bảng", LANG_JP: "テーブル列追加/削除"},
+    "column_ctrl.section.search": {LANG_VI: "Tìm kiếm", LANG_JP: "検索"},
+    "column_ctrl.section.columns": {LANG_VI: "Chỉnh sửa cột", LANG_JP: "列編集"},
+    "column_ctrl.section.data": {LANG_VI: "Data cột", LANG_JP: "列データ"},
+    "column_ctrl.section.sql": {LANG_VI: "SQL", LANG_JP: "SQL"},
+    "column_ctrl.section.log": {LANG_VI: "Log", LANG_JP: "Log"},
+    "column_ctrl.label.table_name": {LANG_VI: "Tên bảng", LANG_JP: "テーブル名"},
+    "column_ctrl.label.backup_table": {LANG_VI: "Bảng backup", LANG_JP: "バックアップ表"},
+    "column_ctrl.label.column_type": {LANG_VI: "Column Type", LANG_JP: "列タイプ"},
+    "column_ctrl.label.default_value": {LANG_VI: "Default Value", LANG_JP: "デフォルト値"},
+    "column_ctrl.label.values": {LANG_VI: "Value", LANG_JP: "値リスト"},
+    "column_ctrl.label.value_hint": {LANG_VI: "Mỗi dòng tương ứng với 1 data", LANG_JP: "各行は1つの値"},
+    "column_ctrl.label.sql_file_none": {LANG_VI: "Chưa chọn file", LANG_JP: "ファイル未選択"},
+    "column_ctrl.btn.choose_sql": {LANG_VI: "Chọn file SQL", LANG_JP: "SQLファイルを選択"},
+    "column_ctrl.btn.generate_sql": {LANG_VI: "Tạo SQL", LANG_JP: "SQL生成"},
+    "column_ctrl.btn.reset": {LANG_VI: "Reset", LANG_JP: "リセット"},
+    "column_ctrl.btn.update_sql": {LANG_VI: "Cập nhật SQL", LANG_JP: "SQLを確定"},
+    "column_ctrl.btn.execute": {LANG_VI: "Thực thi", LANG_JP: "実行"},
+    "column_ctrl.dialog.new_column": {
+        LANG_VI: "Nhập tên cột mới (chỉ kí tự, số và _).",
+        LANG_JP: "新しい列名を入力してください (英数字と_のみ)。"
+    },
+    "column_ctrl.dialog.sql_file": {LANG_VI: "Chọn file SQL", LANG_JP: "SQLファイルを選択"},
+    "column_ctrl.filter.sql": {LANG_VI: "SQL files", LANG_JP: "SQLファイル"},
+    "column_ctrl.filter.all": {LANG_VI: "Tất cả", LANG_JP: "すべてのファイル"},
+    "column_ctrl.msg.column_exists": {LANG_VI: "Cột {column} đã tồn tại.", LANG_JP: "列{column}は既に存在します。"},
+    "column_ctrl.msg.no_columns": {LANG_VI: "Không có cột nào để sinh SQL.", LANG_JP: "SQLを生成する列がありません。"},
+    "column_ctrl.msg.type_required": {LANG_VI: "Cột {column} cần khai báo Column Type.", LANG_JP: "列{column}の型を入力してください。"},
+    "column_ctrl.msg.select_table_first": {LANG_VI: "Hãy chọn bảng trước.", LANG_JP: "先にテーブルを選択してください。"},
+    "column_ctrl.msg.invalid_sql_file": {LANG_VI: "File SQL thiếu DROP - DROP - COMMENT.", LANG_JP: "SQLファイルにDROP/DROP/COMMENTが不足しています。"},
+    "column_ctrl.msg.empty_sql": {LANG_VI: "Chưa có nội dung SQL.", LANG_JP: "SQL内容が空です。"},
+    "column_ctrl.msg.backup_name_required": {LANG_VI: "Tên bảng backup không hợp lệ.", LANG_JP: "バックアップ表名が不正です。"},
+    "column_ctrl.msg.sql_locked": {LANG_VI: "Đã cập nhật SQL thủ công.", LANG_JP: "手動SQLを確定しました。"},
+    "column_ctrl.msg.read_sql_error": {LANG_VI: "Không đọc được file SQL: {error}", LANG_JP: "SQLファイルを読み込めません: {error}"},
+    "column_ctrl.msg.file_structure_warning": {
+        LANG_VI: "File SQL thiếu cấu trúc DROP - DROP - COMMENT (ALTER TABLE tùy chọn).",
+        LANG_JP: "SQLファイルにDROP-DROP-COMMENT(ALTER TABLEは任意)が不足しています。"
+    },
+    "column_ctrl.log.table_ready": {
+        LANG_VI: "Đã tải bảng {table}, backup {backup}.",
+        LANG_JP: "テーブル{table}を読み込み、バックアップ{backup}を準備しました。"
+    },
+    "column_ctrl.log.sql_generated": {LANG_VI: "Đã sinh SQL theo cấu hình cột.", LANG_JP: "列設定からSQLを生成しました。"},
+    "column_ctrl.log.use_file_sql": {LANG_VI: "Sử dụng file SQL: {path}", LANG_JP: "SQLファイル{path}を使用します。"},
+    "column_ctrl.log.backup_ready": {LANG_VI: "Backup: {backup}", LANG_JP: "バックアップ: {backup}"},
+    "column_ctrl.log.auto_ddl": {LANG_VI: "Sinh DROP/CREATE tự động.", LANG_JP: "DROP/CREATEを自動生成。"},
+    "column_ctrl.log.insert_ready": {LANG_VI: "Chuẩn bị INSERT cho {columns} cột.", LANG_JP: "{columns}列のINSERTを準備しました。"},
+    "column_ctrl.log.manual_sql": {LANG_VI: "Đã ghi nhận SQL thủ công.", LANG_JP: "手動SQLを採用しました。"},
+    "column_ctrl.log.execute": {LANG_VI: "Thực thi script.", LANG_JP: "スクリプトを実行します。"},
+    "column_ctrl.log.execute_done": {LANG_VI: "Đã thực thi xong.", LANG_JP: "実行が完了しました。"},
+    "column_ctrl.log.file_loaded": {LANG_VI: "Đã nạp file SQL {path}.", LANG_JP: "SQLファイル{path}を読み込みました。"},
+    "column_ctrl.log.sync_from_file": {LANG_VI: "Đã cập nhật cột theo file SQL.", LANG_JP: "SQLファイルの内容で列を更新しました。"},
+    "column_ctrl.log.reset": {LANG_VI: "Đã reset về cấu trúc ban đầu.", LANG_JP: "初期構成にリセットしました。"},
 
     # --- Main logs ---
     "main.log.title": {LANG_VI: "Danh sách log", LANG_JP: "ログ一覧"},
