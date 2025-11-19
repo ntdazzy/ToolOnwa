@@ -598,11 +598,11 @@ class ColumnControlWindow(BackupRestoreBase):
 
     def _build_backup_sql(self) -> str:
         backup_raw = self.var_backup_table.get().strip()
-        table = self._active_table["full"]
+        table = self._active_table["table"]
         if not backup_raw:
             raise ValueError(_t("column_ctrl.msg.backup_name_required"))
-        bk_owner, bk_name = self._split_table(backup_raw)
-        full_backup = f"{bk_owner}.{bk_name}"
+        _, bk_name = self._split_table(backup_raw)
+        full_backup = bk_name
         sql = (
             f"/* DROP TABLE {full_backup} */\n"
             f"DROP TABLE {full_backup} CASCADE CONSTRAINTS PURGE;\n"
@@ -614,7 +614,7 @@ class ColumnControlWindow(BackupRestoreBase):
         return sql
 
     def _build_drop_create_sql(self, columns: Sequence[ColumnConfig]) -> str:
-        target = self._active_table["full"]
+        target = self._active_table["table"]
         lines = []
         for cfg in columns:
             lines.append(f"    {cfg.name} {self._format_column_definition(cfg)}")
@@ -631,11 +631,11 @@ class ColumnControlWindow(BackupRestoreBase):
 
     def _build_insert_sql(self, columns: Sequence[ColumnConfig]) -> str:
         backup_raw = self.var_backup_table.get().strip()
-        target = self._active_table["full"]
+        target = self._active_table["table"]
         if not backup_raw:
             raise ValueError(_t("column_ctrl.msg.backup_name_required"))
-        bk_owner, bk_name = self._split_table(backup_raw)
-        full_backup = f"{bk_owner}.{bk_name}"
+        _, bk_name = self._split_table(backup_raw)
+        full_backup = bk_name
         select_parts = []
         column_names = []
         for cfg in columns:
