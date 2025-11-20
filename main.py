@@ -21,7 +21,7 @@ from screen.MU import log_viewer as log_viewer
 from screen.General import history_window, rdsinfo, data_compare
 from core import i18n
 
-APP_TITLE = "DatMeow v1.1"
+APP_TITLE = "DatMeow v1.2 VIP Premium Super Limited Gaylo ProVip"
 WIN_W, WIN_H = 560, 600
 BASE_DIR = os.path.dirname(__file__)
 FONTS_DIR = None  # set below
