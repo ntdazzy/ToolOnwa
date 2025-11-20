@@ -101,15 +101,16 @@ class ColumnControlWindow(BackupRestoreBase):
         self.frm_main = ttk.Frame(self, padding=8)
         self.frm_main.pack(fill="both", expand=True)
         self.frm_main.columnconfigure(0, weight=1)
-        self.frm_main.rowconfigure(0, weight=2)
-        self.frm_main.rowconfigure(1, weight=3)
+        # Hàng top (tìm kiếm/chỉnh sửa/data) nhỏ hơn, ưu tiên diện tích cho SQL/log
+        self.frm_main.rowconfigure(0, weight=1)
+        self.frm_main.rowconfigure(1, weight=20)  # SQL vùng lớn
         self.frm_main.rowconfigure(2, weight=0)
-        self.frm_main.rowconfigure(3, weight=2)
+        self.frm_main.rowconfigure(3, weight=5)
 
         top_sections = ttk.Frame(self.frm_main)
-        top_sections.grid(row=0, column=0, sticky="nsew")
+        top_sections.grid(row=0, column=0, sticky="nsew", pady=(0, 4))
         top_sections.columnconfigure(0, weight=1)
-        top_sections.columnconfigure(1, weight=3)
+        top_sections.columnconfigure(1, weight=2)
         top_sections.columnconfigure(2, weight=2)
         top_sections.rowconfigure(0, weight=1)
 
@@ -125,7 +126,7 @@ class ColumnControlWindow(BackupRestoreBase):
         self.ent_search.grid(row=1, column=0, sticky="ew", pady=(2, 6))
         self.ent_search.bind("<KeyRelease>", lambda _e: self._filter_tables())
 
-        self.list_tables = tk.Listbox(self.grp_search, height=12)
+        self.list_tables = tk.Listbox(self.grp_search, height=8)
         self.list_tables.grid(row=2, column=0, sticky="nsew")
         self.list_tables.bind("<<ListboxSelect>>", self._handle_table_select)
 
@@ -144,7 +145,7 @@ class ColumnControlWindow(BackupRestoreBase):
         columns_frame.rowconfigure(0, weight=1)
         columns_frame.columnconfigure(0, weight=1)
 
-        self.lst_columns = tk.Listbox(columns_frame, height=12, exportselection=False)
+        self.lst_columns = tk.Listbox(columns_frame, height=8, exportselection=False)
         self.lst_columns.grid(row=0, column=0, sticky="nsew")
         self.lst_columns.bind("<<ListboxSelect>>", self._on_column_select)
 
@@ -182,7 +183,7 @@ class ColumnControlWindow(BackupRestoreBase):
 
         self.lbl_values = ttk.Label(self.grp_data, text=_t("column_ctrl.label.values"))
         self.lbl_values.grid(row=2, column=0, sticky="w")
-        self.txt_values = ScrolledText(self.grp_data, height=5, width=30, wrap="word")
+        self.txt_values = ScrolledText(self.grp_data, height=8, width=30, wrap="word")
         self.txt_values.grid(row=3, column=0, columnspan=2, sticky="nsew")
         self.lbl_value_hint = ttk.Label(self.grp_data, text=_t("column_ctrl.label.value_hint"))
         self.lbl_value_hint.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))

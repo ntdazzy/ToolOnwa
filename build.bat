@@ -41,6 +41,7 @@ python -m PyInstaller main.py ^
   --hidden-import screen.DB.db_utils ^
   --hidden-import screen.DB.insert ^
   --hidden-import screen.DB.update ^
+  --hidden-import screen.DB.clone ^
   --hidden-import screen.DB.column_control ^
   --hidden-import screen.DB.widgets ^
   --hidden-import screen.DB.template_dialog ^

@@ -677,6 +677,77 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "log.detail.error_title": {LANG_VI: "Chi tiết lỗi", LANG_JP: "エラー詳細"},
     "log.detail.params_title": {LANG_VI: "Tham số", LANG_JP: "パラメータ"},
 
+
+    # --- Clone DB ---
+    "clone.title": {LANG_VI: "Clone DB", LANG_JP: "DBクローン"},
+    "clone.section.source": {LANG_VI: "Môi trường gốc", LANG_JP: "コピー元"},
+    "clone.section.target": {LANG_VI: "Môi trường đích", LANG_JP: "コピー先"},
+    "clone.section.tables": {LANG_VI: "Chọn bảng", LANG_JP: "テーブル選択"},
+    "clone.section.log": {LANG_VI: "Log", LANG_JP: "ログ"},
+    "clone.label.table_search": {LANG_VI: "Tìm kiếm bảng", LANG_JP: "テーブル検索"},
+    "clone.label.user": {LANG_VI: "User ID", LANG_JP: "ユーザーID"},
+    "clone.label.password": {LANG_VI: "Mật khẩu", LANG_JP: "パスワード"},
+    "clone.label.alias": {LANG_VI: "Data Source", LANG_JP: "データソース"},
+    "clone.label.host": {LANG_VI: "Host", LANG_JP: "ホスト"},
+    "clone.label.port": {LANG_VI: "Port", LANG_JP: "ポート"},
+    "clone.label.use_host_port": {LANG_VI: "Kết nối bằng Host/Port", LANG_JP: "ホスト/ポートで接続"},
+    "clone.btn.save_env": {LANG_VI: "Lưu môi trường", LANG_JP: "環境を保存"},
+    "clone.btn.rename_env": {LANG_VI: "Đổi tên", LANG_JP: "名前変更"},
+    "clone.btn.delete_env": {LANG_VI: "Xóa môi trường", LANG_JP: "環境を削除"},
+    "clone.btn.check_connection": {LANG_VI: "Kiểm tra kết nối", LANG_JP: "接続テスト"},
+    "clone.btn.add": {LANG_VI: "Thêm", LANG_JP: "追加"},
+    "clone.btn.edit_target": {LANG_VI: "Sửa bảng đích", LANG_JP: "コピー先を編集"},
+    "clone.btn.remove": {LANG_VI: "Xóa", LANG_JP: "削除"},
+    "clone.btn.clear": {LANG_VI: "Xóa hết", LANG_JP: "全削除"},
+    "clone.btn.export": {LANG_VI: "Export", LANG_JP: "エクスポート"},
+    "clone.option.truncate": {
+        LANG_VI: "Truncate bảng đích trước khi insert",
+        LANG_JP: "コピー先をTRUNCATEしてから挿入",
+    },
+    "clone.column.source": {LANG_VI: "Bảng nguồn", LANG_JP: "コピー元"},
+    "clone.column.target": {LANG_VI: "Bảng đích", LANG_JP: "コピー先"},
+    "clone.status.disconnected": {LANG_VI: "Chưa kết nối", LANG_JP: "未接続"},
+    "clone.status.connecting": {LANG_VI: "Đang kết nối...", LANG_JP: "接続中..."},
+    "clone.status.connected": {LANG_VI: "Đã kết nối", LANG_JP: "接続済み"},
+    "clone.status.failed": {LANG_VI: "Kết nối thất bại: {error}", LANG_JP: "接続失敗: {error}"},
+    "clone.dialog.save_env": {LANG_VI: "Tên môi trường lưu:", LANG_JP: "保存する環境名"},
+    "clone.dialog.rename_env": {LANG_VI: "Đổi tên môi trường:", LANG_JP: "環境名の変更"},
+    "clone.dialog.target_table": {LANG_VI: "Nhập tên bảng đích", LANG_JP: "コピー先テーブル名"},
+    "clone.msg.need_user_pass": {LANG_VI: "Hãy nhập User và Password.", LANG_JP: "ユーザーとパスワードを入力してください。"},
+    "clone.msg.need_host_port": {LANG_VI: "Hãy nhập Host và Port.", LANG_JP: "ホストとポートを入力してください。"},
+    "clone.msg.need_alias": {LANG_VI: "Hãy nhập Data Source.", LANG_JP: "データソースを入力してください。"},
+    "clone.msg.save_env_error": {
+        LANG_VI: "Không thể lưu môi trường: {error}",
+        LANG_JP: "環境を保存できません: {error}",
+    },
+    "clone.msg.save_env_ok": {LANG_VI: "Đã lưu môi trường.", LANG_JP: "環境を保存しました。"},
+    "clone.msg.select_env": {LANG_VI: "Hãy chọn môi trường trước.", LANG_JP: "環境を選択してください。"},
+    "clone.msg.confirm_delete_env": {LANG_VI: "Xóa môi trường {name}?", LANG_JP: "環境{name}を削除しますか？"},
+    "clone.msg.same_environment": {
+        LANG_VI: "Nguồn và đích không được trùng.",
+        LANG_JP: "コピー元とコピー先を別にしてください。",
+    },
+    "clone.msg.table_error": {
+        LANG_VI: "Không tải được danh sách bảng: {error}",
+        LANG_JP: "テーブル一覧の取得に失敗しました: {error}",
+    },
+    "clone.msg.select_mapping": {LANG_VI: "Hãy chọn dòng cần chỉnh.", LANG_JP: "変更する行を選択してください。"},
+    "clone.msg.no_table_selected": {LANG_VI: "Chưa chọn bảng nào.", LANG_JP: "テーブルが選択されていません。"},
+    "clone.msg.no_columns": {LANG_VI: "Bảng {table} không có cột.", LANG_JP: "テーブル{table}に列がありません。"},
+    "clone.log.start": {LANG_VI: "Bắt đầu export {count} bảng.", LANG_JP: "{count}件のテーブルをエクスポート開始。"},
+    "clone.log.copied": {
+        LANG_VI: "Đã sao chép {rows} dòng từ {source} sang {target}.",
+        LANG_JP: "{source}→{target} に{rows}行コピーしました。",
+    },
+    "clone.log.error": {LANG_VI: "Lỗi khi xử lý {source}: {error}", LANG_JP: "{source}の処理でエラー: {error}"},
+    "clone.log.summary": {
+        LANG_VI: "Hoàn tất: tổng {total} bảng, lỗi {failed}.",
+        LANG_JP: "完了: 全{total}件 中 {failed}件失敗。",
+    },
+    "clone.msg.open_error": {
+        LANG_VI: "Không mở được màn hình Clone DB: {error}",
+        LANG_JP: "Clone DB画面を開けません: {error}",
+    },
     # --- Column Control ---
     "column_ctrl.title": {LANG_VI: "Thêm/Xóa Cột cho bảng", LANG_JP: "テーブル列追加/削除"},
     "column_ctrl.section.search": {LANG_VI: "Tìm kiếm", LANG_JP: "検索"},
@@ -798,3 +869,4 @@ def remove_listener(callback: Callable[[str], None]) -> None:
         _listeners.remove(callback)
     except ValueError:
         pass
+

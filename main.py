@@ -16,6 +16,7 @@ from screen.DB import insert as insert_screen
 from screen.DB import update as update_screen
 from screen.DB import backup as backup_screen
 from screen.DB import column_control as column_control_screen
+from screen.DB import clone as clone_screen
 from screen.MU import log_viewer as log_viewer
 from screen.General import history_window, rdsinfo, data_compare
 from core import i18n
@@ -562,7 +563,12 @@ class ToolVIP(tk.Tk):
 
     # ---------- DB Clone ----------
     def _on_clone_db_button_click(self):
-        messagebox.showinfo(APP_TITLE, self._t("main.msg.coming_soon"))
+        try:
+            defaults = self._current_connection_inputs()
+            clone_screen.open_clone_window(self, default_source=defaults, conn_blocks=self.conn_blocks)
+        except Exception as exc:
+            self._logger.exception("Failed to open clone DB window", exc_info=exc)
+            messagebox.showerror(APP_TITLE, self._t("clone.msg.open_error", error=exc), parent=self)
 
     def _prompt_add_ttl_files(self, *, open_manager_after: bool = False) -> None:
         initial_dir = ""
@@ -1132,6 +1138,16 @@ class ToolVIP(tk.Tk):
             "host": host,
             "port": port,
             "use_host_port": use_host_port,
+        }
+
+    def _current_connection_inputs(self) -> dict[str, str]:
+        return {
+            "user": self.ent_user.get().strip(),
+            "password": self.ent_pass.get(),
+            "alias": self.ent_dsn.get().strip(),
+            "host": self.ent_host.get().strip(),
+            "port": self.ent_port.get().strip(),
+            "use_host_port": bool(self.var_use_host_port.get()),
         }
 
     def _open_rds_info(self):
