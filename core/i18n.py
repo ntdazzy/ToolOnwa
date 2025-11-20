@@ -38,8 +38,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "main.section.db": {LANG_VI: "DB", LANG_JP: "DB"},
     "main.section.connection": {LANG_VI: "Thiết lập kết nối", LANG_JP: "接続設定"},
     "main.section.actions": {LANG_VI: "Tác vụ", LANG_JP: "操作"},
-    "main.section.mu": {LANG_VI: "MU", LANG_JP: "MU"},
-    "main.section.common": {LANG_VI: "Chung", LANG_JP: "共通"},
+    "main.section.mu": {LANG_VI: "Chung", LANG_JP: "共通"},
+    "main.section.common": {LANG_VI: "Tài Liệu", LANG_JP: "資料"},
 
     "main.label.user_id": {LANG_VI: "User ID", LANG_JP: "ユーザーID"},
     "main.label.password": {LANG_VI: "Mật khẩu", LANG_JP: "パスワード"},
