@@ -1,21 +1,21 @@
 ;========================================================
-; Macro connect MU & BI (single session, countdown)
-; Encoding: UTF-8 (no BOM)
+; Macro ket noi MU & BI (1 phien, hien thi thoi gian)
+; Encoding: ASCII (khong dau)
 ;========================================================
 timeout = 3
 
-;--- Thông tin chung ---
+;--- Thong tin chung ---
 HOSTIP_DEV     = 'ec2-52-194-17-213.ap-northeast-1.compute.amazonaws.com'
 HOSTIP_PRD     = 'ec2-18-176-19-35.ap-northeast-1.compute.amazonaws.com'
 USERNAME       = 'ec2-user'
 
-; Thời gian tối đa phiên (giây) - 3 giờ = 10800
+; Thoi gian toi da (giay) - 3 gio = 10800
 MAX_SESSION_SECONDS = 10800
-; Khoảng kiểm tra kết nối và cập nhật tiêu đề (giây)
+; Chu ky kiem tra link / cap nhat tieu de (giay)
 CHECK_INTERVAL_SECONDS = 5
 
 ;--------------------------
-; Khai báo mảng lựa chọn
+; Lua chon
 ;--------------------------
 strdim subs 5
 subs[0] = 'MU'
@@ -40,7 +40,7 @@ servers[3] = 'DEV MU03'
 servers[4] = 'DEV MU04'
 servers[5] = 'DEV MU05'
 
-; Biến trạng thái
+; Bien trang thai
 sub_sel    = -1
 env_sel    = -1
 mail_sel   = 0
@@ -50,11 +50,12 @@ connected = 0
 TITLE_BASE = ''
 
 ;--------------------------
-; Đường dẫn file
+; Duong dan
 ;--------------------------
 getdir mydir
 getenv 'TEMP' TMPDIR
-if TMPDIR = '' then
+strlen TMPDIR
+if result = 0 then
     TMPDIR = mydir
 endif
 
@@ -65,28 +66,28 @@ STATE_FILE = TMPDIR
 strconcat STATE_FILE '\CONNECT-TO-TARGET-SERVER.last'
 
 ;--------------------------
-; Đóng mọi phiên Tera Term đang mở để đảm bảo chỉ 1 macro chạy
+; Dam bao chi mot phien: tat Tera Term cu
 ;--------------------------
 exec 'taskkill /F /IM ttermpro.exe /T'
-; Bỏ qua lỗi nếu không có tiến trình nào
+; ignore errors
 
-; Xóa lock cũ (nếu treo)
+; Remove stale lock if any
 fileopen lockh LOCK_FILE 0
 if result = 0 then
     fileclose lockh
     filedelete LOCK_FILE
 endif
 
-; Tạo lock mới
+; Create lock
 fileopen lockh LOCK_FILE 1
 if result <> 0 then
-    messagebox 'Không tạo được lock file. Thoát.' 'Error'
+    messagebox 'Khong tao duoc lock file. Thoat.' 'Error'
     goto cleanup_no_conn
 endif
 fileclose lockh
 
 ;--------------------------
-; Đọc lựa chọn gần nhất nếu có
+; Doc cau hinh lan truoc neu co
 ;--------------------------
 STATE_AVAILABLE = 1
 fileopen stateh STATE_FILE 0
@@ -94,34 +95,66 @@ if result <> 0 then
     STATE_AVAILABLE = 0
 else
     filereadln stateh line
-    if result <> 0 then STATE_AVAILABLE = 0 endif
-    if STATE_AVAILABLE = 1 then str2int last_sub line endif
+    if result <> 0 then
+        STATE_AVAILABLE = 0
+    endif
+    if STATE_AVAILABLE = 1 then
+        str2int last_sub line
+    endif
 
     filereadln stateh line
-    if result <> 0 then STATE_AVAILABLE = 0 endif
-    if STATE_AVAILABLE = 1 then str2int last_env line endif
+    if result <> 0 then
+        STATE_AVAILABLE = 0
+    endif
+    if STATE_AVAILABLE = 1 then
+        str2int last_env line
+    endif
 
     filereadln stateh line
-    if result <> 0 then STATE_AVAILABLE = 0 endif
-    if STATE_AVAILABLE = 1 then str2int last_mail line endif
+    if result <> 0 then
+        STATE_AVAILABLE = 0
+    endif
+    if STATE_AVAILABLE = 1 then
+        str2int last_mail line
+    endif
 
     filereadln stateh line
-    if result <> 0 then STATE_AVAILABLE = 0 endif
-    if STATE_AVAILABLE = 1 then str2int last_server line endif
+    if result <> 0 then
+        STATE_AVAILABLE = 0
+    endif
+    if STATE_AVAILABLE = 1 then
+        str2int last_server line
+    endif
 
     fileclose stateh
 endif
 
 if STATE_AVAILABLE = 1 then
-    if last_sub < 0 then STATE_AVAILABLE = 0 endif
-    if last_sub > 1 then STATE_AVAILABLE = 0 endif ; chỉ MU/BI
-    if last_env < 0 then STATE_AVAILABLE = 0 endif
-    if last_env > 1 then STATE_AVAILABLE = 0 endif
-    if last_mail < 0 then STATE_AVAILABLE = 0 endif
-    if last_mail > 1 then STATE_AVAILABLE = 0 endif
+    if last_sub < 0 then
+        STATE_AVAILABLE = 0
+    endif
+    if last_sub > 1 then
+        STATE_AVAILABLE = 0
+    endif ; chỉ MU/BI
+    if last_env < 0 then
+        STATE_AVAILABLE = 0
+    endif
+    if last_env > 1 then
+        STATE_AVAILABLE = 0
+    endif
+    if last_mail < 0 then
+        STATE_AVAILABLE = 0
+    endif
+    if last_mail > 1 then
+        STATE_AVAILABLE = 0
+    endif
     if last_mail = 1 then
-        if last_server < 0 then STATE_AVAILABLE = 0 endif
-        if last_server > 5 then STATE_AVAILABLE = 0 endif
+        if last_server < 0 then
+            STATE_AVAILABLE = 0
+        endif
+        if last_server > 5 then
+            STATE_AVAILABLE = 0
+        endif
     endif
 endif
 
@@ -142,38 +175,38 @@ if STATE_AVAILABLE = 1 then
 endif
 
 ;--------------------------
-; 1) Chọn Subsystem (giữ nguyên danh sách)
+; 1) Chon Subsystem
 ;--------------------------
-listbox 'Choose Subsystem' 'Subsystem' subs
+listbox 'Chon Subsystem' 'Subsystem' subs
 if result = -1 then
-    messagebox 'Đã hủy.' 'Alert'
+    messagebox 'Da huy.' 'Alert'
     goto cleanup_no_conn
 endif
 if result > 1 then
-    messagebox 'Hiện chỉ hỗ trợ MU/BI.' 'Alert'
+    messagebox 'Chi ho tro MU/BI.' 'Alert'
     goto cleanup_no_conn
 endif
 sub_sel = result
 
 ;--------------------------
-; 2) Chọn Environment (DEV/PROD)
+; 2) Chon Environment (DEV/PROD)
 ;--------------------------
-listbox 'Choose Environment' 'Environment' envs
+listbox 'Chon Environment' 'Environment' envs
 if result = -1 then
-    messagebox 'Đã hủy.' 'Alert'
+    messagebox 'Da huy.' 'Alert'
     goto cleanup_no_conn
 endif
 env_sel = result
 
 ;--------------------------
-; 3) Show Mail (chỉ DEV/MU)
+; 3) Hien thi Mail (chi DEV/MU)
 ;--------------------------
-mail_sel = 0 ; mặc định NO
+mail_sel = 0 ; default NO
 if sub_sel = 0 then
     if env_sel = 0 then
-        listbox 'Want to show Mail Info ?' 'Server' mail_opts
+        listbox 'Xem thong tin mail?' 'Server' mail_opts
         if result = -1 then
-            messagebox 'Đã hủy.' 'Alert'
+            messagebox 'Da huy.' 'Alert'
             goto cleanup_no_conn
         endif
         mail_sel = result
@@ -181,13 +214,13 @@ if sub_sel = 0 then
 endif
 
 ;--------------------------
-; 4) Choose DB Server (nếu mail_sel = YES)
+; 4) Chon DB Server (neu mail_sel = YES)
 ;--------------------------
 server_sel = -1
 if mail_sel = 1 then
-    listbox 'Choose DB Server' 'Server' servers
+    listbox 'Chon DB Server' 'Server' servers
     if result = -1 then
-        messagebox 'Đã hủy.' 'Alert'
+        messagebox 'Da huy.' 'Alert'
         goto cleanup_no_conn
     endif
     server_sel = result
@@ -196,7 +229,7 @@ endif
 :selections_done
 
 ;--------------------------
-; Lưu lựa chọn lần này
+; Luu cau hinh hien tai
 ;--------------------------
 fileopen stateh STATE_FILE 1
 if result = 0 then
@@ -208,7 +241,7 @@ if result = 0 then
 endif
 
 ;--------------------------
-; 5) Gán KEY_FILE & HOST (Bastion)
+; 5) Gan KEY_FILE & HOST (Bastion)
 ;--------------------------
 if env_sel = 0 then
     strconcat KEY_FILE mydir
@@ -224,20 +257,20 @@ strconcat INI_FILE mydir
 strconcat INI_FILE '\TERATERM.INI'
 
 ;--------------------------
-; 6) Tạo lệnh kết nối SSH tới Bastion (publickey)
+; 6) Tao lenh SSH toi Bastion (publickey)
 ;--------------------------
 sprintf2 COMMAND '%s:22 /ssh /auth=publickey /user=%s /keyfile=%s /F=%s' HOSTIP USERNAME KEY_FILE INI_FILE
 
 ;--------------------------
-; 7) Hiện Alert và kết nối Bastion
+; 7) Hien Alert va ket noi Bastion
 ;--------------------------
-sprintf2 STATUS 'Connecting to %s - %s' subs[sub_sel] envs[env_sel]
+sprintf2 STATUS 'Dang ket noi %s - %s' subs[sub_sel] envs[env_sel]
 statusbox STATUS 'Alert'
 
 connect COMMAND
 if result <> 2 then
     closesbox
-    ERRMSG = 'SSH Connection Failed.'
+    ERRMSG = 'SSH ket noi that bai.'
     messagebox ERRMSG 'Error'
     goto cleanup_no_conn
 endif
@@ -246,24 +279,18 @@ connected = 1
 closesbox
 
 ;--------------------------
-; 8) Nếu cần, chạy getmail.bat để mở mail info
+; 8) Chay getmail.bat neu can
 ;--------------------------
 if env_sel = 0 then
     if sub_sel = 0 then
         if mail_sel = 1 then
-            ; Chuyển server_sel thành chuỗi
+            ; server_sel to string
             sprintf2 ser '%d' server_sel
-
-            ; Tạo đường dẫn đến batch
-            BATCH_PATH_STR = mydir
-            strconcat BATCH_PATH_STR '\getmail.bat '
-            strconcat BATCH_PATH_STR ser
-
-            ; Thực thi batch
+            ; batch path with quotes
+            sprintf2 BATCH_PATH_STR '"%s\getmail.bat" %s' mydir ser
             exec BATCH_PATH_STR
-
             if result <> 0 then
-                messagebox 'Không thể chạy batch getmail!' 'Error'
+                messagebox 'Khong chay duoc getmail.bat' 'Error'
                 goto cleanup
             endif
         endif
@@ -271,33 +298,34 @@ if env_sel = 0 then
 endif
 
 ;--------------------------
-; 9) Theo dõi kết nối và tự đóng khi ngắt hoặc hết 3 giờ
-;    Đồng hồ đếm ngược hiển thị trên tiêu đề Tera Term
+; 9) Theo doi ket noi va tu dong dong
+;    Tieu de: subsystem / environment / thoi gian da ket noi (MM:SS)
 ;--------------------------
 remaining = MAX_SESSION_SECONDS
 sprintf2 TITLE_BASE '%s - %s' subs[sub_sel] envs[env_sel]
+
+; chi dat tieu de khi da link
+testlink
+if result = 0 then
+    goto cleanup
+endif
+
 settitle TITLE_BASE
 
 :watch_session
 
-; cập nhật tiêu đề với đếm ngược
-minutes = remaining / 60
-seconds = remaining - (minutes * 60)
-if seconds < 10 then
-    sprintf2 TITLE '%s | còn %d:0%d' TITLE_BASE minutes seconds
-else
-    sprintf2 TITLE '%s | còn %d:%d' TITLE_BASE minutes seconds
-endif
-settitle TITLE
-
+; kiem tra link truoc khi xu ly
 testlink
 if result = 0 then
-    messagebox 'Mất kết nối từ server. Đóng tất cả cửa sổ macro.' 'Thông báo'
     goto cleanup
 endif
 
+; cap nhat tieu de voi thoi gian con lai (phut)
+minutes = remaining / 60
+sprintf2 TITLE '%s | %d min' TITLE_BASE minutes
+settitle TITLE
+
 if remaining <= 0 then
-    messagebox 'Đã hết thời gian phiên (3 giờ). Đang đóng kết nối.' 'Thông báo'
     goto cleanup
 endif
 
@@ -307,7 +335,10 @@ goto watch_session
 
 :cleanup
 if connected = 1 then
-    closett
+    testlink
+    if result <> 0 then
+        closett
+    endif
 endif
 filedelete LOCK_FILE
 end
