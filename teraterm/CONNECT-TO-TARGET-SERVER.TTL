@@ -1,5 +1,6 @@
 ;========================================================
-; Marco connect MU & BI
+; Macro connect MU & BI (single session, countdown)
+; Encoding: UTF-8 (no BOM)
 ;========================================================
 timeout = 3
 
@@ -8,24 +9,13 @@ HOSTIP_DEV     = 'ec2-52-194-17-213.ap-northeast-1.compute.amazonaws.com'
 HOSTIP_PRD     = 'ec2-18-176-19-35.ap-northeast-1.compute.amazonaws.com'
 USERNAME       = 'ec2-user'
 
-; Lấy thư mục chứa macro
-getdir mydir
-
-; Đường dẫn động cho các file
-strconcat INI_FILE mydir
-strconcat INI_FILE '\TERATERM.INI'
-
-strconcat KEY_FILE_DEV mydir
-strconcat KEY_FILE_DEV '\DEV-CLASS-BASTION-KEY.pem'
-
-strconcat KEY_FILE_PRD mydir
-strconcat KEY_FILE_PRD '\PRD-CLASS-BASTION-KEY.pem'
-
 ; Thời gian tối đa phiên (giây) - 3 giờ = 10800
 MAX_SESSION_SECONDS = 10800
+; Khoảng kiểm tra kết nối và cập nhật tiêu đề (giây)
+CHECK_INTERVAL_SECONDS = 5
 
 ;--------------------------
-; 1) Chọn Subsystem (MU/BI)
+; Khai báo mảng lựa chọn
 ;--------------------------
 strdim subs 5
 subs[0] = 'MU'
@@ -33,36 +23,147 @@ subs[1] = 'BI'
 subs[2] = 'CM'
 subs[3] = 'OR'
 subs[4] = 'SJ'
-listbox 'Choose Subsystem' 'Subsystem' subs
-if result = -1 then
-    messagebox 'Cancelled.' 'Alert'
-    end
-endif
-if result > 1 then
-    messagebox 'Chưa Support hẹ hẹ hẹ.' 'Alert'
-    end
+
+strdim envs 2
+envs[0] = 'DEV'
+envs[1] = 'PROD'
+
+strdim mail_opts 2
+mail_opts[0] = 'NO'
+mail_opts[1] = 'YES'
+
+strdim servers 6
+servers[0] = 'STAGING'
+servers[1] = 'DEV MU01'
+servers[2] = 'DEV MU02'
+servers[3] = 'DEV MU03'
+servers[4] = 'DEV MU04'
+servers[5] = 'DEV MU05'
+
+; Biến trạng thái
+sub_sel    = -1
+env_sel    = -1
+mail_sel   = 0
+server_sel = -1
+STATE_AVAILABLE = 0
+connected = 0
+TITLE_BASE = ''
+
+;--------------------------
+; Đường dẫn file
+;--------------------------
+getdir mydir
+getenv 'TEMP' TMPDIR
+if TMPDIR = '' then
+    TMPDIR = mydir
 endif
 
+LOCK_FILE = TMPDIR
+strconcat LOCK_FILE '\CONNECT-TO-TARGET-SERVER.lock'
+
+STATE_FILE = TMPDIR
+strconcat STATE_FILE '\CONNECT-TO-TARGET-SERVER.last'
+
+;--------------------------
+; Đóng mọi phiên Tera Term đang mở để đảm bảo chỉ 1 macro chạy
+;--------------------------
+exec 'taskkill /F /IM ttermpro.exe /T'
+; Bỏ qua lỗi nếu không có tiến trình nào
+
+; Xóa lock cũ (nếu treo)
+fileopen lockh LOCK_FILE 0
+if result = 0 then
+    fileclose lockh
+    filedelete LOCK_FILE
+endif
+
+; Tạo lock mới
+fileopen lockh LOCK_FILE 1
+if result <> 0 then
+    messagebox 'Không tạo được lock file. Thoát.' 'Error'
+    goto cleanup_no_conn
+endif
+fileclose lockh
+
+;--------------------------
+; Đọc lựa chọn gần nhất nếu có
+;--------------------------
+STATE_AVAILABLE = 1
+fileopen stateh STATE_FILE 0
+if result <> 0 then
+    STATE_AVAILABLE = 0
+else
+    filereadln stateh line
+    if result <> 0 then STATE_AVAILABLE = 0 endif
+    if STATE_AVAILABLE = 1 then str2int last_sub line endif
+
+    filereadln stateh line
+    if result <> 0 then STATE_AVAILABLE = 0 endif
+    if STATE_AVAILABLE = 1 then str2int last_env line endif
+
+    filereadln stateh line
+    if result <> 0 then STATE_AVAILABLE = 0 endif
+    if STATE_AVAILABLE = 1 then str2int last_mail line endif
+
+    filereadln stateh line
+    if result <> 0 then STATE_AVAILABLE = 0 endif
+    if STATE_AVAILABLE = 1 then str2int last_server line endif
+
+    fileclose stateh
+endif
+
+if STATE_AVAILABLE = 1 then
+    if last_sub < 0 then STATE_AVAILABLE = 0 endif
+    if last_sub > 1 then STATE_AVAILABLE = 0 endif ; chỉ MU/BI
+    if last_env < 0 then STATE_AVAILABLE = 0 endif
+    if last_env > 1 then STATE_AVAILABLE = 0 endif
+    if last_mail < 0 then STATE_AVAILABLE = 0 endif
+    if last_mail > 1 then STATE_AVAILABLE = 0 endif
+    if last_mail = 1 then
+        if last_server < 0 then STATE_AVAILABLE = 0 endif
+        if last_server > 5 then STATE_AVAILABLE = 0 endif
+    endif
+endif
+
+if STATE_AVAILABLE = 1 then
+    server_label = 'N/A'
+    if last_mail = 1 then
+        server_label = servers[last_server]
+    endif
+    sprintf2 last_msg 'Dùng lại cấu hình lần trước? %s / %s / Mail: %s / DB: %s' subs[last_sub] envs[last_env] mail_opts[last_mail] server_label
+    yesnobox last_msg 'Dùng cấu hình trước?'
+    if result = 1 then
+        sub_sel = last_sub
+        env_sel = last_env
+        mail_sel = last_mail
+        server_sel = last_server
+        goto selections_done
+    endif
+endif
+
+;--------------------------
+; 1) Chọn Subsystem (giữ nguyên danh sách)
+;--------------------------
+listbox 'Choose Subsystem' 'Subsystem' subs
+if result = -1 then
+    messagebox 'Đã hủy.' 'Alert'
+    goto cleanup_no_conn
+endif
+if result > 1 then
+    messagebox 'Hiện chỉ hỗ trợ MU/BI.' 'Alert'
+    goto cleanup_no_conn
+endif
 sub_sel = result
 
 ;--------------------------
 ; 2) Chọn Environment (DEV/PROD)
 ;--------------------------
-strdim envs 2
-envs[0] = 'DEV'
-envs[1] = 'PROD'
 listbox 'Choose Environment' 'Environment' envs
 if result = -1 then
-    messagebox 'Cancelled.' 'Alert'
-    end
+    messagebox 'Đã hủy.' 'Alert'
+    goto cleanup_no_conn
 endif
-; if result > 0 then
-;     messagebox 'Tính vô honban phá cái gì.' 'Alert'
-;     end
-; endif
-
 env_sel = result
-
 
 ;--------------------------
 ; 3) Show Mail (chỉ DEV/MU)
@@ -70,13 +171,10 @@ env_sel = result
 mail_sel = 0 ; mặc định NO
 if sub_sel = 0 then
     if env_sel = 0 then
-        strdim mail 2
-        mail[0] = 'NO'
-        mail[1] = 'YES'
-        listbox 'Want to show Mail Info ?' 'Server' mail
+        listbox 'Want to show Mail Info ?' 'Server' mail_opts
         if result = -1 then
-            messagebox 'Cancelled.' 'Alert'
-            end
+            messagebox 'Đã hủy.' 'Alert'
+            goto cleanup_no_conn
         endif
         mail_sel = result
     endif
@@ -87,31 +185,43 @@ endif
 ;--------------------------
 server_sel = -1
 if mail_sel = 1 then
-    strdim server 6
-    server[0] = 'STAGING'
-    server[1] = 'DEV MU01'
-    server[2] = 'DEV MU02'
-    server[3] = 'DEV MU03'
-    server[4] = 'DEV MU04'
-    server[5] = 'DEV MU05'
-    listbox 'Choose DB Server' 'Server' server
+    listbox 'Choose DB Server' 'Server' servers
     if result = -1 then
-        messagebox 'Cancelled.' 'Alert'
-        end
+        messagebox 'Đã hủy.' 'Alert'
+        goto cleanup_no_conn
     endif
     server_sel = result
+endif
+
+:selections_done
+
+;--------------------------
+; Lưu lựa chọn lần này
+;--------------------------
+fileopen stateh STATE_FILE 1
+if result = 0 then
+    filewriteln stateh sub_sel
+    filewriteln stateh env_sel
+    filewriteln stateh mail_sel
+    filewriteln stateh server_sel
+    fileclose stateh
 endif
 
 ;--------------------------
 ; 5) Gán KEY_FILE & HOST (Bastion)
 ;--------------------------
 if env_sel = 0 then
-    KEY_FILE = KEY_FILE_DEV
-    HOSTIP   = HOSTIP_DEV
+    strconcat KEY_FILE mydir
+    strconcat KEY_FILE '\DEV-CLASS-BASTION-KEY.pem'
+    HOSTIP = HOSTIP_DEV
 else
-    KEY_FILE = KEY_FILE_PRD
-    HOSTIP   = HOSTIP_PRD
+    strconcat KEY_FILE mydir
+    strconcat KEY_FILE '\PRD-CLASS-BASTION-KEY.pem'
+    HOSTIP = HOSTIP_PRD
 endif
+
+strconcat INI_FILE mydir
+strconcat INI_FILE '\TERATERM.INI'
 
 ;--------------------------
 ; 6) Tạo lệnh kết nối SSH tới Bastion (publickey)
@@ -119,7 +229,7 @@ endif
 sprintf2 COMMAND '%s:22 /ssh /auth=publickey /user=%s /keyfile=%s /F=%s' HOSTIP USERNAME KEY_FILE INI_FILE
 
 ;--------------------------
-; 7) Hiển thị Alert và kết nối Bastion
+; 7) Hiện Alert và kết nối Bastion
 ;--------------------------
 sprintf2 STATUS 'Connecting to %s - %s' subs[sub_sel] envs[env_sel]
 statusbox STATUS 'Alert'
@@ -129,12 +239,15 @@ if result <> 2 then
     closesbox
     ERRMSG = 'SSH Connection Failed.'
     messagebox ERRMSG 'Error'
-    end
+    goto cleanup_no_conn
 endif
 
+connected = 1
 closesbox
 
-
+;--------------------------
+; 8) Nếu cần, chạy getmail.bat để mở mail info
+;--------------------------
 if env_sel = 0 then
     if sub_sel = 0 then
         if mail_sel = 1 then
@@ -151,17 +264,54 @@ if env_sel = 0 then
 
             if result <> 0 then
                 messagebox 'Không thể chạy batch getmail!' 'Error'
-                end
+                goto cleanup
             endif
         endif
     endif
 endif
 
 ;--------------------------
-; 9) Giữ kết nối trong MAX_SESSION_SECONDS
+; 9) Theo dõi kết nối và tự đóng khi ngắt hoặc hết 3 giờ
+;    Đồng hồ đếm ngược hiển thị trên tiêu đề Tera Term
 ;--------------------------
-pause MAX_SESSION_SECONDS
+remaining = MAX_SESSION_SECONDS
+sprintf2 TITLE_BASE '%s - %s' subs[sub_sel] envs[env_sel]
+settitle TITLE_BASE
 
-; Khi hết thời gian, đóng session
-closett
+:watch_session
+
+; cập nhật tiêu đề với đếm ngược
+minutes = remaining / 60
+seconds = remaining - (minutes * 60)
+if seconds < 10 then
+    sprintf2 TITLE '%s | còn %d:0%d' TITLE_BASE minutes seconds
+else
+    sprintf2 TITLE '%s | còn %d:%d' TITLE_BASE minutes seconds
+endif
+settitle TITLE
+
+testlink
+if result = 0 then
+    messagebox 'Mất kết nối từ server. Đóng tất cả cửa sổ macro.' 'Thông báo'
+    goto cleanup
+endif
+
+if remaining <= 0 then
+    messagebox 'Đã hết thời gian phiên (3 giờ). Đang đóng kết nối.' 'Thông báo'
+    goto cleanup
+endif
+
+pause CHECK_INTERVAL_SECONDS
+remaining = remaining - CHECK_INTERVAL_SECONDS
+goto watch_session
+
+:cleanup
+if connected = 1 then
+    closett
+endif
+filedelete LOCK_FILE
+end
+
+:cleanup_no_conn
+filedelete LOCK_FILE
 end

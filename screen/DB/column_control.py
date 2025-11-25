@@ -579,6 +579,9 @@ class ColumnControlWindow(BackupRestoreBase):
     def _compose_script(self) -> str:
         columns = self._collect_final_columns()
         parts = []
+        session_prefix = self._session_prefix()
+        if session_prefix:
+            parts.append(session_prefix)
         parts.append(self._build_backup_sql())
         ddl_part = ""
         if self._sql_file_path and self._sql_file_content:
@@ -596,6 +599,19 @@ class ColumnControlWindow(BackupRestoreBase):
         if not text:
             raise ValueError(_t("column_ctrl.msg.empty_sql"))
         return text
+
+    def _session_prefix(self) -> str:
+        """Đặt CURRENT_SCHEMA để các câu lệnh không cần chỉ định owner."""
+        owner = ""
+        try:
+            owner = (self._active_table.get("owner") or "").strip().upper()  # type: ignore[union-attr]
+        except Exception:
+            owner = ""
+        if not owner and hasattr(self, "current_owner"):
+            owner = str(getattr(self, "current_owner", "")).strip().upper()
+        if not owner:
+            return ""
+        return f"ALTER SESSION SET CURRENT_SCHEMA={owner};"
 
     def _build_backup_sql(self) -> str:
         backup_raw = self.var_backup_table.get().strip()
